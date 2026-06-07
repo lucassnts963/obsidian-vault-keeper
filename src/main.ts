@@ -116,10 +116,13 @@ export default class VaultKeeperPlugin extends Plugin {
       return
     }
 
-    const notice = new Notice('🔄 Sincronizando...', 0)
+    let notice = new Notice('🔄 Sincronizando...', 0)
 
     try {
-      const result = await this.git.sync()
+      const result = await this.git.sync((phase) => {
+        // Atualiza a Notice com a fase atual
+        notice.setMessage(`🔄 ${phase}`)
+      })
       notice.hide()
 
       const lines = [

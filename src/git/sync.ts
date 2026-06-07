@@ -36,6 +36,18 @@ function compositeFs(vaultFs: PromiseFsClient, gitFs: PromiseFsClient): PromiseF
   }
 }
 
+/**
+ * Promise.race com timeout — evita que operações de rede travem indefinidamente.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Timeout após ${ms / 1000}s`)), ms),
+    ),
+  ])
+}
+
 export interface SyncResult {
   pulled: number
   pushed: number
@@ -159,51 +171,67 @@ export class GitSync {
    * - Se fast-forward falhar, loga o erro e segue (não força merge)
    * - Commit só se houver mudanças locais
    * - Push só se houver commits para enviar
+   *
+   * @param onPhase callback opcional pra UI mostrar progresso
    */
-  async sync(): Promise<SyncResult> {
+  async sync(onPhase?: (msg: string) => void): Promise<SyncResult> {
     this.ensureReady()
 
     const commits: string[] = []
     let pulled = 0
     let pushed = 0
 
-    // --- 1. Pull (fast-forward only) ---
+    const log = (msg: string) => {
+      commits.push(msg)
+      onPhase?.(msg)
+      console.log('[VaultKeeper]', msg)
+    }
+
+    // --- 1. Pull (fast-forward only, com timeout 20s) ---
+    log('pull: verificando...')
     try {
-      await git.pull({
-        fs: this.fs,
-        http: this.httpClient,
-        dir: this.dir,
-        url: this.settings.remote,
-        ref: 'main',
-        singleBranch: true,
-        fastForwardOnly: true,
-        author: {
-          name: this.settings.authorName || 'Vault Keeper',
-          email: this.settings.authorEmail || 'vault@keeper.local',
-        },
-        headers: this.authHeaders(),
-      })
+      await withTimeout(
+        git.pull({
+          fs: this.fs,
+          http: this.httpClient,
+          dir: this.dir,
+          url: this.settings.remote,
+          ref: 'main',
+          singleBranch: true,
+          fastForwardOnly: true,
+          author: {
+            name: this.settings.authorName || 'Vault Keeper',
+            email: this.settings.authorEmail || 'vault@keeper.local',
+          },
+          headers: this.authHeaders(),
+          onMessage: (msg) => console.log('[VaultKeeper pull]', msg),
+        }),
+        20000,
+      )
       pulled = 1
-      commits.push('pull: atualizado via fast-forward')
+      log('pull: atualizado via fast-forward')
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       // Fast-forward pode falhar se houver divergência — não é fatal
-      commits.push(`pull: ignorado (${msg.slice(0, 80)})`)
+      log(`pull: ignorado (${msg.slice(0, 80)})`)
     }
 
     // --- 2. Detecta mudanças locais ---
-    const matrix = await git.statusMatrix({
-      fs: this.fs,
-      dir: this.dir,
-      // Ignora .git/ e arquivos binários comuns
-      filter: (f: string) =>
-        !f.startsWith('.git/') &&
-        !f.endsWith('.xlsx') &&
-        !f.endsWith('.xls') &&
-        !f.endsWith('.pdf') &&
-        !f.endsWith('.png') &&
-        !f.endsWith('.jpg'),
-    })
+    log('status: analisando...')
+    const matrix = await withTimeout(
+      git.statusMatrix({
+        fs: this.fs,
+        dir: this.dir,
+        filter: (f: string) =>
+          !f.startsWith('.git/') &&
+          !f.endsWith('.xlsx') &&
+          !f.endsWith('.xls') &&
+          !f.endsWith('.pdf') &&
+          !f.endsWith('.png') &&
+          !f.endsWith('.jpg'),
+      }),
+      15000,
+    )
 
     const changedFiles: string[] = []
     for (const [filepath, _head, workdir, _stage] of matrix) {
@@ -216,6 +244,7 @@ export class GitSync {
 
     // --- 3. Add + Commit (se houver mudanças) ---
     if (changedFiles.length > 0) {
+      log(`commit: ${changedFiles.length} arquivos...`)
       const now = new Date()
       const timestamp = now.toISOString().replace('T', ' ').slice(0, 19)
 
@@ -241,28 +270,34 @@ export class GitSync {
         },
       })
 
-      commits.push(`commit: ${sha.slice(0, 7)} — ${changedFiles.length} arquivos`)
+      log(`commit: ${sha.slice(0, 7)} — ${changedFiles.length} arquivos`)
+    } else {
+      log('status: nada alterado')
     }
 
-    // --- 4. Push ---
+    // --- 4. Push (com timeout 20s) ---
+    log('push: enviando...')
     try {
-      const result = await git.push({
-        fs: this.fs,
-        http: this.httpClient,
-        dir: this.dir,
-        url: this.settings.remote,
-        ref: 'main',
-        headers: this.authHeaders(),
-      })
+      const result = await withTimeout(
+        git.push({
+          fs: this.fs,
+          http: this.httpClient,
+          dir: this.dir,
+          url: this.settings.remote,
+          ref: 'main',
+          headers: this.authHeaders(),
+        }),
+        20000,
+      )
 
       if (result.ok) {
         pushed = 1
-        commits.push(`push: ok → ${this.settings.remote}`)
+        log(`push: ok → ${this.settings.remote}`)
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      commits.push(`push: ERRO — ${msg.slice(0, 120)}`)
-      throw err  // push falhou = operação incompleta
+      log(`push: ERRO — ${msg.slice(0, 120)}`)
+      throw err
     }
 
     const branch = (await git.currentBranch({ fs: this.fs, dir: this.dir })) ?? 'main'
