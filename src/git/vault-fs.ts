@@ -27,6 +27,15 @@ export function createVaultFs(vault: Vault, vaultRoot?: string): PromiseFsClient
     return rel || '.'
   }
 
+  /** Dot-dirs que NUNCA devem ser varridas pelo isomorphic-git */
+  const SKIP_DIRS = new Set(['.git', '.obsidian', '.trash', '.vscode', '.idea'])
+
+  /** Verifica se o path é/contém um dot-dir bloqueado */
+  function isDotDir(p: string): boolean {
+    const parts = p.replace(/^\//, '').split('/')
+    return parts.some((part) => part.startsWith('.') && SKIP_DIRS.has(part))
+  }
+
   return {
     promises: {
       async readFile(path: string): Promise<Uint8Array> {
@@ -49,8 +58,18 @@ export function createVaultFs(vault: Vault, vaultRoot?: string): PromiseFsClient
       },
 
       async readdir(path: string): Promise<string[]> {
-        const listing = await vault.adapter.list(rel(path))
-        return [...listing.files, ...listing.folders]
+        const rp = rel(path)
+        // Se for um dot-dir, retorna vazio — não existe no working tree
+        if (isDotDir(rp)) return []
+        try {
+          const listing = await vault.adapter.list(rp)
+          // Filtra dot-dirs do resultado
+          const files = listing.files.filter((f) => !SKIP_DIRS.has(f))
+          const folders = listing.folders.filter((f) => !SKIP_DIRS.has(f))
+          return [...files, ...folders]
+        } catch {
+          return []
+        }
       },
 
       async mkdir(path: string): Promise<void> {
@@ -64,9 +83,12 @@ export function createVaultFs(vault: Vault, vaultRoot?: string): PromiseFsClient
       async stat(
         path: string,
       ): Promise<{ type: 'file' | 'dir'; mtimeMs: number; size: number }> {
-        const s = await vault.adapter.stat(rel(path))
+        const rp = rel(path)
+        // Dot-dirs não existem no working tree
+        if (isDotDir(rp)) throw new Error(`ENOENT: ${rp}`)
+        const s = await vault.adapter.stat(rp)
         if (!s) {
-          throw new Error(`ENOENT: ${rel(path)}`)
+          throw new Error(`ENOENT: ${rp}`)
         }
         return {
           type: s.type === 'folder' ? 'dir' : 'file',
