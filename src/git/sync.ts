@@ -133,20 +133,46 @@ export class GitSync {
   }
 
   /**
-   * Status completo do repositório.
+   * Status rápido do repositório.
+   * Usa listFiles() primeiro pra pegar só os arquivos rastreados,
+   * depois passa filepaths pro statusMatrix — evita stat() no vault inteiro.
+   * No mobile isso é a diferença entre 2s e timeout de 30s.
    */
   async status(): Promise<StatusResult> {
     try {
       this.ensureReady()
-      const branch = await git.currentBranch({
-        fs: this.fs,
-        dir: this.dir,
-      })
 
-      const matrix = await git.statusMatrix({
-        fs: this.fs,
-        dir: this.dir,
-      })
+      // Branch (rápido, lê HEAD)
+      const branch = await withTimeout(
+        git.currentBranch({ fs: this.fs, dir: this.dir }),
+        5000,
+      )
+
+      // Só escaneia arquivos rastreados pelo git — não o vault inteiro
+      let trackedFiles: string[] = []
+      try {
+        trackedFiles = await withTimeout(
+          git.listFiles({ fs: this.fs, dir: this.dir }),
+          10000,
+        )
+      } catch {
+        // Se listFiles falhar (repo novo/corrompido), sem changes
+        return {
+          branch: branch ?? 'unknown',
+          localChanges: [],
+          unpushedCommits: 0,
+        }
+      }
+
+      // statusMatrix só nos arquivos rastreados (não faz walk no vault inteiro!)
+      const matrix = await withTimeout(
+        git.statusMatrix({
+          fs: this.fs,
+          dir: this.dir,
+          filepaths: trackedFiles,
+        }),
+        15000,
+      )
 
       const localChanges: string[] = []
       for (const [filepath, _head, workdir, _stage] of matrix) {
@@ -155,11 +181,11 @@ export class GitSync {
         }
       }
 
-      const localCommits = await git.log({
-        fs: this.fs,
-        dir: this.dir,
-        depth: 50,
-      })
+      // Unpushed commits (lê só .git/logs)
+      const localCommits = await withTimeout(
+        git.log({ fs: this.fs, dir: this.dir, depth: 50 }),
+        5000,
+      )
 
       return {
         branch: branch ?? 'unknown',
@@ -217,12 +243,38 @@ export class GitSync {
       log(`pull: ignorado (${msg.slice(0, 80)})`)
     }
 
-    // --- 2. Detecta mudanças locais ---
+    // --- 2. Detecta mudanças locais (híbrido: rastreados + novos) ---
     log('status: analisando...')
+
+    // Pega arquivos rastreados do index (rápido, 1 leitura)
+    let filesToCheck: string[] = []
+    try {
+      filesToCheck = await git.listFiles({ fs: this.fs, dir: this.dir })
+    } catch {
+      filesToCheck = []
+    }
+
+    // Adiciona novos arquivos em diretórios chave (não rastreados ainda)
+    const watchDirs = ['inbox', 'raw', 'wiki', 'templates']
+    for (const dir of watchDirs) {
+      try {
+        const entries = await this.fs.promises.readdir(dir)
+        for (const entry of entries) {
+          const full = `${dir}/${entry}`
+          if (entry.endsWith('.md') && !filesToCheck.includes(full)) {
+            filesToCheck.push(full)
+          }
+        }
+      } catch {
+        // diretório não existe ainda
+      }
+    }
+
     const matrix = await withTimeout(
       git.statusMatrix({
         fs: this.fs,
         dir: this.dir,
+        filepaths: filesToCheck.length > 0 ? filesToCheck : undefined,
       }),
       30000,
     )

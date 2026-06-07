@@ -88,6 +88,8 @@ export default class VaultKeeperPlugin extends Plugin {
     // ── Status bar ──────────────────────────────────────
     this.statusBarEl = this.addStatusBarItem()
     this.statusBarEl.addClass('vault-keeper-status')
+    this.statusBarEl.setText('git: …')
+    // Não bloqueia o startup — atualiza assíncrona
     this.refreshStatusBar()
 
     // ── Auto-sync ───────────────────────────────────────
