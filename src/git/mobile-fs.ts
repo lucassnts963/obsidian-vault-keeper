@@ -17,7 +17,9 @@ export function createMobileGitFs(vaultPath: string): PromiseFsClient {
 
   /** Lê arquivo binário usando Capacitor nativo */
   async function nativeRead(relPath: string): Promise<Uint8Array> {
+    console.log('[VaultKeeper mobile] nativeRead:', relPath)
     const Capacitor = (globalThis as any).Capacitor
+    console.log('[VaultKeeper mobile] Capacitor?', !!Capacitor, 'Plugins?', !!Capacitor?.Plugins, 'Filesystem?', !!Capacitor?.Plugins?.Filesystem)
     if (!Capacitor?.Plugins?.Filesystem) {
       throw new Error('Capacitor Filesystem não disponível')
     }

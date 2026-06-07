@@ -16,7 +16,9 @@ function compositeFs(vaultFs: PromiseFsClient, gitFs: PromiseFsClient): PromiseF
   }
 
   function pick(p: string) {
-    return isGit(p) ? gitFs : vaultFs
+    const useGit = isGit(p)
+    if (useGit) console.log('[VaultKeeper fs] .git → mobile:', p)
+    return useGit ? gitFs : vaultFs
   }
 
   return {
@@ -247,8 +249,10 @@ export class GitSync {
           !f.endsWith('.png') &&
           !f.endsWith('.jpg'),
       }),
-      15000,
+      30000,
     )
+
+    log(`status: ${matrix.length} arquivos...`)
 
     const changedFiles: string[] = []
     for (const [filepath, _head, workdir, _stage] of matrix) {
