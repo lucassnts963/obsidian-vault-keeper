@@ -99,9 +99,25 @@ export class GitSync {
   }
 
   /**
+   * URL com token embutido pra bypassar CSP no mobile.
+   * CSP do Obsidian mobile pode bloquear header Authorization customizado,
+   * mas URLs com userinfo passam.
+   */
+  private get effectiveUrl(): string {
+    if (!this.settings.token) return this.settings.remote
+    // GitHub aceita token como username (senha vazia)
+    return this.settings.remote.replace(
+      'https://',
+      `https://${this.settings.token}:x-oauth-basic@`,
+    )
+  }
+
+  /**
    * Headers HTTP com token de autenticação.
    */
   private authHeaders(): Record<string, string> {
+    // Quando usamos effectiveUrl com token embutido, não precisa de header
+    if (this.settings.token && this.effectiveUrl.includes('@')) return {}
     if (!this.settings.token) return {}
     return { Authorization: `Bearer ${this.settings.token}` }
   }
@@ -195,10 +211,11 @@ export class GitSync {
           fs: this.fs,
           http: this.httpClient,
           dir: this.dir,
-          url: this.settings.remote,
+          url: this.effectiveUrl,
           ref: 'main',
           singleBranch: true,
           fastForwardOnly: true,
+          corsProxy: isCapacitor() ? 'https://cors.isomorphic-git.org' : undefined,
           author: {
             name: this.settings.authorName || 'Vault Keeper',
             email: this.settings.authorEmail || 'vault@keeper.local',
@@ -283,8 +300,9 @@ export class GitSync {
           fs: this.fs,
           http: this.httpClient,
           dir: this.dir,
-          url: this.settings.remote,
+          url: this.effectiveUrl,
           ref: 'main',
+          corsProxy: isCapacitor() ? 'https://cors.isomorphic-git.org' : undefined,
           headers: this.authHeaders(),
         }),
         20000,
