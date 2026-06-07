@@ -13,10 +13,11 @@
     "yaml": "^2.5.0"
   },
   "devDependencies": {
-    "obsidian": "latest",
-    "@types/node": "^20.0.0",
-    "typescript": "^5.5.0",
+    "@types/node": "^20.19.42",
+    "builtin-modules": "^4.0.0",
     "esbuild": "^0.23.0",
-    "builtin-modules": "^4.0.0"
+    "obsidian": "latest",
+    "typescript": "^5.5.0",
+    "vitest": "^4.1.8"
   }
 }
