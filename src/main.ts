@@ -1,8 +1,3 @@
-// ⚠️ POLYFILL — importado como side-effect, DEVE ser o primeiro import
-// O módulo polyfill.ts faz: require('buffer') → globalThis.Buffer = Buffer
-// Isso executa ANTES dos próximos requires (esbuild CJS garante ordem)
-import './polyfill'
-
 import { Notice, Plugin, WorkspaceLeaf, addIcon, setIcon } from 'obsidian'
 import { VaultKeeperSettings, DEFAULT_SETTINGS } from './settings'
 import { VaultKeeperSettingTab } from './settings-tab'

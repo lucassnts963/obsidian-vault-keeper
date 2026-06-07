@@ -21,6 +21,10 @@ await esbuild.build({
     '@lezer/highlight',
     '@lezer/lr',
   ],
+  // Injeta o polyfill Buffer no topo absoluto do bundle.
+  // Diferente de import (sujeito a hoisting) e banner (não acessa módulos),
+  // o inject força o código do polyfill ANTES de qualquer outro require.
+  inject: ['./src/polyfill.ts'],
   format: 'cjs',
   target: 'es2022',
   logLevel: 'info',
