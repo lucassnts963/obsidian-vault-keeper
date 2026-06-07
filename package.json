@@ -1,0 +1,22 @@
+{
+  "name": "obsidian-vault-keeper",
+  "version": "0.1.0",
+  "description": "Metodologia completa de gestão de conhecimento com LLM — inbox, ingest, query, lint, cross-ingest, git sync",
+  "main": "main.js",
+  "scripts": {
+    "dev": "node esbuild.config.mjs",
+    "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
+    "lint": "eslint . --ext .ts"
+  },
+  "dependencies": {
+    "isomorphic-git": "^1.27.0",
+    "yaml": "^2.5.0"
+  },
+  "devDependencies": {
+    "obsidian": "latest",
+    "@types/node": "^20.0.0",
+    "typescript": "^5.5.0",
+    "esbuild": "^0.23.0",
+    "builtin-modules": "^4.0.0"
+  }
+}
