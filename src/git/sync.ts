@@ -39,7 +39,7 @@ export class GitSync {
   }
 
   private get fs() {
-    return createVaultFs(this.vault)
+    return createVaultFs(this.vault, this.dir)
   }
 
   private get httpClient() {
