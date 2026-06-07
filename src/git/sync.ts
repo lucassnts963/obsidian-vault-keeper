@@ -4,7 +4,32 @@ import type { PromiseFsClient } from 'isomorphic-git'
 import http from 'isomorphic-git/http/web'
 import type { GitSettings } from '../settings'
 import { createVaultFs } from './vault-fs'
-import { isCapacitor } from './mobile-fs'
+import { isCapacitor, getVaultPath, createMobileGitFs } from './mobile-fs'
+
+/**
+ * FS composto: rotéia .git/** → gitFs, resto → vaultFs.
+ */
+function compositeFs(vaultFs: PromiseFsClient, gitFs: PromiseFsClient): PromiseFsClient {
+  function isGit(p: string): boolean {
+    return p === '.git' || p.startsWith('.git/') || p.includes('/.git/')
+  }
+  function pick(p: string) { return isGit(p) ? gitFs : vaultFs }
+  return {
+    promises: {
+      readFile: (p: string) => pick(p).promises.readFile(p),
+      writeFile: (p: string, d: Uint8Array | string) => pick(p).promises.writeFile(p, d),
+      unlink: (p: string) => pick(p).promises.unlink(p),
+      readdir: (p: string) => pick(p).promises.readdir(p),
+      mkdir: (p: string) => pick(p).promises.mkdir(p),
+      rmdir: (p: string) => pick(p).promises.rmdir(p),
+      stat: (p: string) => pick(p).promises.stat(p),
+      lstat: (p: string) => pick(p).promises.lstat!(p),
+      readlink: (p: string) => pick(p).promises.readlink!(p),
+      symlink: (t: string, p: string) => pick(p).promises.symlink!(t, p),
+      chmod: (p: string, m: number) => pick(p).promises.chmod!(p, m),
+    },
+  }
+}
 
 /**
  * Promise.race com timeout — evita que operações de rede travem indefinidamente.
@@ -53,7 +78,14 @@ export class GitSync {
   }
 
   private get fs(): PromiseFsClient {
-    return createVaultFs(this.vault, this.dir)
+    const vaultFs = createVaultFs(this.vault, this.dir)
+
+    // Desktop: VaultFS puro
+    if (!isCapacitor()) return vaultFs
+
+    // Mobile: fs híbrido — .git/ via XHR/Capacitor, working tree via VaultFS
+    const gitFs = createMobileGitFs(getVaultPath())
+    return compositeFs(vaultFs, gitFs)
   }
 
   private get httpClient() {

@@ -84,8 +84,9 @@ export function createVaultFs(vault: Vault, vaultRoot?: string): PromiseFsClient
         path: string,
       ): Promise<{ type: 'file' | 'dir'; mtimeMs: number; size: number }> {
         const rp = rel(path)
-        // Dot-dirs não existem no working tree
-        if (isDotDir(rp)) throw new Error(`ENOENT: ${rp}`)
+        // Dot-dirs não existem como parte do working tree
+        // (impede o walker de entrar, mas readFile ainda acessa .git/)
+        if (isDotDir(rp) && rp !== '.git') throw new Error(`ENOENT: ${rp}`)
         const s = await vault.adapter.stat(rp)
         if (!s) {
           throw new Error(`ENOENT: ${rp}`)
