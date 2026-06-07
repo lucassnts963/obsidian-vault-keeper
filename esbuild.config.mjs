@@ -28,4 +28,8 @@ await esbuild.build({
   treeShaking: true,
   outfile: 'main.js',
   minify: prod,
+  // Polyfill Buffer (Node.js API) para o isomorphic-git no browser/mobile
+  banner: {
+    js: `var Buffer = require('buffer').Buffer; if (typeof globalThis !== 'undefined') globalThis.Buffer = Buffer; if (typeof window !== 'undefined') window.Buffer = Buffer;`,
+  },
 })

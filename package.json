@@ -9,6 +9,7 @@
     "lint": "eslint . --ext .ts"
   },
   "dependencies": {
+    "buffer": "^6.0.3",
     "isomorphic-git": "^1.27.0",
     "yaml": "^2.5.0"
   },
