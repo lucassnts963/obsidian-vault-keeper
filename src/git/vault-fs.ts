@@ -1,120 +1,174 @@
-import type { Vault } from 'obsidian'
+import type { Vault, DataAdapter } from 'obsidian'
 import type { PromiseFsClient } from 'isomorphic-git'
 
 /**
- * Bridge entre isomorphic-git (PromiseFsClient) e Obsidian Vault API.
+ * Bridge entre isomorphic-git e Obsidian Vault API.
  *
- * isomorphic-git roda puro em JS — sem dependência de Node fs ou shell git.
- * Todas as operações de arquivo passam pelo adapter do Obsidian, que funciona
- * no desktop (Electron) e mobile (Capacitor/WebView).
- *
- * O adapter do Obsidian trabalha com caminhos RELATIVOS à raiz do vault.
- * isomorphic-git pode chamar com caminhos absolutos (ex: no Android).
- * Este bridge normaliza automaticamente.
+ * Baseado no MyAdapter do plugin obsidian-git (Vinzent03).
+ * Pontos críticos aprendidos:
+ * 1. stat() DEVE retornar {isFile(), isDirectory(), isSymbolicLink()}
+ * 2. adapter.readBinary() funciona pra .git/ no mobile
+ * 3. Sem filtrar dot-dirs — deixa o walker do git decidir
  */
 export function createVaultFs(vault: Vault, vaultRoot?: string): PromiseFsClient {
-  // Detecta raiz real se não fornecida
-  const basePath = vaultRoot ?? (vault.adapter as any).basePath ?? ''
+  const adapter: DataAdapter = vault.adapter
+  const basePath = vaultRoot ?? (adapter as any).basePath ?? ''
   const baseLen = basePath ? basePath.replace(/\/$/, '').length + 1 : 0
 
   /** Normaliza caminho absoluto → relativo */
   function rel(path: string): string {
+    if (path === '.' || path === '/') return '/'
     if (!basePath || !path.startsWith(basePath)) return path
-    // Remove prefixo e barra inicial: /storage/.../Knowledge/foo.md → foo.md
-    let rel = path.slice(baseLen)
-    // Fallback se o slice der ruim
-    if (rel.startsWith('/')) rel = rel.slice(1)
-    return rel || '.'
+    let r = path.slice(baseLen)
+    if (r.startsWith('/')) r = r.slice(1)
+    return r || '/'
   }
 
-  /** Dot-dirs que NUNCA devem ser varridas pelo isomorphic-git */
-  const SKIP_DIRS = new Set(['.git', '.obsidian', '.trash', '.vscode', '.idea'])
-
-  /** Verifica se o path é/contém um dot-dir bloqueado */
-  function isDotDir(p: string): boolean {
-    const parts = p.replace(/^\//, '').split('/')
-    return parts.some((part) => part.startsWith('.') && SKIP_DIRS.has(part))
-  }
+  /** Cache do git index pra evitar leituras excessivas */
+  let indexCache: ArrayBuffer | undefined
+  let indexMtime: number | undefined
+  let indexCtime: number | undefined
 
   return {
     promises: {
       async readFile(path: string): Promise<Uint8Array> {
-        const buf = await vault.adapter.readBinary(rel(path))
+        const rp = rel(path)
+
+        // Cache do index (igual ao obsidian-git)
+        if (rp.endsWith('.git/index') || rp.endsWith('.git\\index')) {
+          if (indexCache) return new Uint8Array(indexCache)
+          const buf = await adapter.readBinary(rp)
+          indexCache = buf
+          indexMtime = Date.now()
+          indexCtime = Date.now()
+          return new Uint8Array(buf)
+        }
+
+        const buf = await adapter.readBinary(rp)
         return new Uint8Array(buf)
       },
 
       async writeFile(path: string, data: Uint8Array | string): Promise<void> {
+        const rp = rel(path)
         const buffer =
           typeof data === 'string'
             ? new TextEncoder().encode(data).buffer
             : data.buffer instanceof ArrayBuffer
               ? data.buffer
-              : data
-        await vault.adapter.writeBinary(rel(path), buffer as ArrayBuffer)
+              : data.buffer
+
+        // Cache do index + write deferred (obsidian-git faz igual)
+        if (rp.endsWith('.git/index') || rp.endsWith('.git\\index')) {
+          indexCache = buffer as ArrayBuffer
+          indexMtime = Date.now()
+          // Só escreve quando saveAndClear() for chamado
+          return
+        }
+
+        await adapter.writeBinary(rp, buffer as ArrayBuffer)
       },
 
       async unlink(path: string): Promise<void> {
-        await vault.adapter.remove(rel(path))
+        await adapter.remove(rel(path))
       },
 
       async readdir(path: string): Promise<string[]> {
-        const rp = rel(path)
-        // Se for um dot-dir, retorna vazio — não existe no working tree
-        if (isDotDir(rp)) return []
-        try {
-          const listing = await vault.adapter.list(rp)
-          // Filtra dot-dirs do resultado
-          const files = listing.files.filter((f) => !SKIP_DIRS.has(f))
-          const folders = listing.folders.filter((f) => !SKIP_DIRS.has(f))
-          return [...files, ...folders]
-        } catch {
-          return []
+        const rp = rel(path) === '.' ? '/' : rel(path)
+        const listing = await adapter.list(rp)
+        const all = [...listing.files, ...listing.folders]
+        // Normaliza paths (obsidian-git faz igual)
+        if (rp !== '/') {
+          return all.map((e) => e.substring(rp.length).replace(/^\//, ''))
         }
+        return all
       },
 
       async mkdir(path: string): Promise<void> {
-        await vault.adapter.mkdir(rel(path))
+        await adapter.mkdir(rel(path))
       },
 
       async rmdir(path: string): Promise<void> {
-        await vault.adapter.rmdir(rel(path), false)
+        await adapter.rmdir(rel(path), false)
       },
 
       async stat(
         path: string,
-      ): Promise<{ type: 'file' | 'dir'; mtimeMs: number; size: number }> {
+      ): Promise<{
+        type: 'file' | 'dir'
+        mtimeMs: number
+        size: number
+        isFile(): boolean
+        isDirectory(): boolean
+        isSymbolicLink(): boolean
+      }> {
         const rp = rel(path)
-        // Dot-dirs não existem como parte do working tree
-        // (impede o walker de entrar, mas readFile ainda acessa .git/)
-        if (isDotDir(rp) && rp !== '.git') throw new Error(`ENOENT: ${rp}`)
-        const s = await vault.adapter.stat(rp)
-        if (!s) {
-          throw new Error(`ENOENT: ${rp}`)
+
+        // .git/index com cache (igual ao obsidian-git)
+        if ((rp.endsWith('.git/index') || rp.endsWith('.git\\index')) && indexCache) {
+          return {
+            type: 'file',
+            size: indexCache.byteLength,
+            mtimeMs: indexMtime ?? Date.now(),
+            isFile: () => true,
+            isDirectory: () => false,
+            isSymbolicLink: () => false,
+          }
         }
+
+        const s = await adapter.stat(rp)
+        if (!s) {
+          // throw ENOENT como objeto (isomorphic-git espera assim)
+          const err: any = new Error(`ENOENT: ${rp}`)
+          err.code = 'ENOENT'
+          throw err
+        }
+
+        const isDir = s.type === 'folder'
         return {
-          type: s.type === 'folder' ? 'dir' : 'file',
-          mtimeMs: s.mtime,
+          type: isDir ? 'dir' : 'file',
           size: s.size ?? 0,
+          mtimeMs: s.mtime,
+          // ESTES MÉTODOS SÃO OBRIGATÓRIOS para o isomorphic-git!
+          isFile: () => !isDir,
+          isDirectory: () => isDir,
+          isSymbolicLink: () => false,
         }
       },
 
-      async lstat(
-        path: string,
-      ): Promise<{ type: 'file' | 'dir'; mtimeMs: number; size: number }> {
+      async lstat(path: string): Promise<any> {
         return this.stat!(path)
       },
 
       async readlink(): Promise<string> {
-        throw new Error('ENOSYS: readlink not supported in Obsidian vault')
+        const err: any = new Error('ENOSYS: readlink')
+        err.code = 'ENOSYS'
+        throw err
       },
 
       async symlink(): Promise<void> {
-        throw new Error('ENOSYS: symlink not supported in Obsidian vault')
+        const err: any = new Error('ENOSYS: symlink')
+        err.code = 'ENOSYS'
+        throw err
       },
 
       async chmod(): Promise<void> {
         // No-op
       },
     },
-  }
+    /** Escreve index cacheado de volta ao disco */
+    async saveAndClear(): Promise<void> {
+      if (indexCache !== undefined) {
+        await adapter.writeBinary(
+          '.git/index',
+          indexCache,
+          indexCtime && indexMtime
+            ? { ctime: indexCtime, mtime: indexMtime } as any
+            : undefined,
+        )
+      }
+      indexCache = undefined
+      indexMtime = undefined
+      indexCtime = undefined
+    },
+  } as PromiseFsClient & { saveAndClear(): Promise<void> }
 }

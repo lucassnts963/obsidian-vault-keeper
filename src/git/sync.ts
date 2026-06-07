@@ -1,47 +1,9 @@
 import type { Vault } from 'obsidian'
+import { requestUrl } from 'obsidian'
 import * as git from 'isomorphic-git'
-import type { PromiseFsClient } from 'isomorphic-git'
-import http from 'isomorphic-git/http/web'
+import type { GitHttpRequest, GitHttpResponse, PromiseFsClient } from 'isomorphic-git'
 import type { GitSettings } from '../settings'
 import { createVaultFs } from './vault-fs'
-import { isCapacitor, getVaultPath, createMobileGitFs } from './mobile-fs'
-
-/**
- * FS composto: rotéia .git/** → gitFs, resto → vaultFs.
- */
-function compositeFs(vaultFs: PromiseFsClient, gitFs: PromiseFsClient): PromiseFsClient {
-  function isGit(p: string): boolean {
-    return p === '.git' || p.startsWith('.git/') || p.includes('/.git/')
-  }
-  function pick(p: string) { return isGit(p) ? gitFs : vaultFs }
-  return {
-    promises: {
-      readFile: (p: string) => pick(p).promises.readFile(p),
-      writeFile: (p: string, d: Uint8Array | string) => pick(p).promises.writeFile(p, d),
-      unlink: (p: string) => pick(p).promises.unlink(p),
-      readdir: (p: string) => pick(p).promises.readdir(p),
-      mkdir: (p: string) => pick(p).promises.mkdir(p),
-      rmdir: (p: string) => pick(p).promises.rmdir(p),
-      stat: (p: string) => pick(p).promises.stat(p),
-      lstat: (p: string) => pick(p).promises.lstat!(p),
-      readlink: (p: string) => pick(p).promises.readlink!(p),
-      symlink: (t: string, p: string) => pick(p).promises.symlink!(t, p),
-      chmod: (p: string, m: number) => pick(p).promises.chmod!(p, m),
-    },
-  }
-}
-
-/**
- * Promise.race com timeout — evita que operações de rede travem indefinidamente.
- */
-function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([
-    promise,
-    new Promise<T>((_, reject) =>
-      setTimeout(() => reject(new Error(`Timeout após ${ms / 1000}s`)), ms),
-    ),
-  ])
-}
 
 export interface SyncResult {
   pulled: number
@@ -58,65 +20,109 @@ export interface StatusResult {
 }
 
 /**
- * Git sync via isomorphic-git — JS puro, sem dependência de shell.
- *
- * Resolve o problema de "buffer error" do plugin Git oficial no mobile,
- * e funciona em qualquer plataforma onde o Obsidian roda.
- *
- * Fluxo: status → pull (fast-forward) → add → commit → push
+ * HTTP client que usa requestUrl() do Obsidian ao invés de fetch().
+ * Bypassa CSP no mobile (mesmo approach do obsidian-git).
+ */
+function obsidianHttp(): any {
+  return {
+    async request({
+      url,
+      method,
+      headers,
+      body,
+    }: GitHttpRequest): Promise<GitHttpResponse> {
+      // Coleta body (isomorphic-git pode passar como AsyncIterable)
+      let collectedBody: ArrayBuffer | undefined
+      if (body) {
+        const chunks: Uint8Array[] = []
+        if (Symbol.asyncIterator in (body as any)) {
+          for await (const chunk of body as any) {
+            chunks.push(chunk)
+          }
+          const total = chunks.reduce((a, c) => a + c.length, 0)
+          const merged = new Uint8Array(total)
+          let offset = 0
+          for (const c of chunks) {
+            merged.set(c, offset)
+            offset += c.length
+          }
+          collectedBody = merged.buffer as ArrayBuffer
+        } else if (body instanceof Uint8Array) {
+          collectedBody = body.buffer as ArrayBuffer
+        }
+      }
+
+      const res = await requestUrl({
+        url,
+        method: method ?? 'GET',
+        headers,
+        body: collectedBody,
+        throw: false,
+      })
+
+      return {
+        url: (res as any).url ?? url,
+        method: method ?? 'GET',
+        statusCode: res.status,
+        statusMessage: res.status.toString(),
+        headers: (res.headers ?? {}) as Record<string, string>,
+        body: [new Uint8Array(res.arrayBuffer)] as any,
+      }
+    },
+  }
+}
+
+/**
+ * Promise.race com timeout.
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
+  return Promise.race([
+    promise,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`Timeout após ${ms / 1000}s`)), ms),
+    ),
+  ])
+}
+
+/**
+ * Git sync via isomorphic-git — JS puro.
+ * Adaptado do plugin obsidian-git (Vinzent03).
  */
 export class GitSync {
   private vault: Vault
   private settings: GitSettings
-  private dir: string  // raiz do vault = working tree
+  private dir: string
+  private fsClient: ReturnType<typeof createVaultFs>
 
   constructor(vault: Vault, settings: { git: GitSettings }) {
     this.vault = vault
     this.settings = settings.git
-    // No Obsidian, a raiz do vault é o diretório de trabalho do git
     this.dir = (vault.adapter as any).basePath ?? '/vault'
+    this.fsClient = createVaultFs(this.vault, this.dir)
   }
 
   private get fs(): PromiseFsClient {
-    const vaultFs = createVaultFs(this.vault, this.dir)
-
-    // Desktop: VaultFS puro
-    if (!isCapacitor()) return vaultFs
-
-    // Mobile: fs híbrido — .git/ via XHR/Capacitor, working tree via VaultFS
-    const gitFs = createMobileGitFs(getVaultPath())
-    return compositeFs(vaultFs, gitFs)
+    return this.fsClient
   }
 
-  private get httpClient() {
-    return http
+  /** Salva index caches e limpa */
+  private async flushIndex(): Promise<void> {
+    if ('saveAndClear' in this.fsClient) {
+      await (this.fsClient as any).saveAndClear()
+    }
   }
 
   /**
-   * URL com token embutido pra bypassar CSP no mobile.
-   * CSP do Obsidian mobile pode bloquear header Authorization customizado,
-   * mas URLs com userinfo passam.
+   * URL com token embutido (bypassa CSP header blocking).
    */
   private get effectiveUrl(): string {
     if (!this.settings.token) return this.settings.remote
-    // GitHub aceita token como username (senha vazia)
     return this.settings.remote.replace(
       'https://',
       `https://${this.settings.token}:x-oauth-basic@`,
     )
   }
 
-  /**
-   * Headers HTTP com token de autenticação.
-   */
-  private authHeaders(): Record<string, string> {
-    // Quando usamos effectiveUrl com token embutido, não precisa de header
-    if (this.settings.token && this.effectiveUrl.includes('@')) return {}
-    if (!this.settings.token) return {}
-    return { Authorization: `Bearer ${this.settings.token}` }
-  }
-
-  /** Verifica se git está configurado */
   private ensureReady(): void {
     if (!this.settings.enabled) {
       throw new Error('Git sync desabilitado nas configurações')
@@ -137,26 +143,18 @@ export class GitSync {
         dir: this.dir,
       })
 
-      // Detecta mudanças locais (workdir vs HEAD)
       const matrix = await git.statusMatrix({
         fs: this.fs,
         dir: this.dir,
-        filter: (f: string) =>
-          f !== '.git' &&
-          !f.startsWith('.git/') &&
-          !f.startsWith('.obsidian/') &&
-          !f.startsWith('.trash/'),
       })
 
       const localChanges: string[] = []
       for (const [filepath, _head, workdir, _stage] of matrix) {
         if (workdir !== 1) {
-          // 1 = unchanged; 0 = absent; 2 = modified
           localChanges.push(filepath)
         }
       }
 
-      // Conta commits não enviados (log local vs remote)
       const localCommits = await git.log({
         fs: this.fs,
         dir: this.dir,
@@ -180,14 +178,6 @@ export class GitSync {
 
   /**
    * Sincronização completa: pull → add → commit → push.
-   *
-   * Estratégia:
-   * - Pull usa fastForwardOnly para evitar conflitos de merge
-   * - Se fast-forward falhar, loga o erro e segue (não força merge)
-   * - Commit só se houver mudanças locais
-   * - Push só se houver commits para enviar
-   *
-   * @param onPhase callback opcional pra UI mostrar progresso
    */
   async sync(onPhase?: (msg: string) => void): Promise<SyncResult> {
     this.ensureReady()
@@ -199,28 +189,24 @@ export class GitSync {
     const log = (msg: string) => {
       commits.push(msg)
       onPhase?.(msg)
-      console.log('[VaultKeeper]', msg)
     }
 
-    // --- 1. Pull (fast-forward only, com timeout 20s) ---
+    // --- 1. Pull (fast-forward only) ---
     log('pull: verificando...')
     try {
       await withTimeout(
         git.pull({
           fs: this.fs,
-          http: this.httpClient,
+          http: obsidianHttp(),
           dir: this.dir,
           url: this.effectiveUrl,
           ref: 'main',
           singleBranch: true,
           fastForwardOnly: true,
-          corsProxy: isCapacitor() ? 'https://cors.isomorphic-git.org' : undefined,
           author: {
             name: this.settings.authorName || 'Vault Keeper',
             email: this.settings.authorEmail || 'vault@keeper.local',
           },
-          headers: this.authHeaders(),
-          onMessage: (msg) => console.log('[VaultKeeper pull]', msg),
         }),
         20000,
       )
@@ -228,7 +214,6 @@ export class GitSync {
       log('pull: atualizado via fast-forward')
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
-      // Fast-forward pode falhar se houver divergência — não é fatal
       log(`pull: ignorado (${msg.slice(0, 80)})`)
     }
 
@@ -238,32 +223,20 @@ export class GitSync {
       git.statusMatrix({
         fs: this.fs,
         dir: this.dir,
-        filter: (f: string) =>
-          f !== '.git' &&
-          !f.startsWith('.git/') &&
-          !f.startsWith('.obsidian/') &&
-          !f.startsWith('.trash/') &&
-          !f.endsWith('.xlsx') &&
-          !f.endsWith('.xls') &&
-          !f.endsWith('.pdf') &&
-          !f.endsWith('.png') &&
-          !f.endsWith('.jpg'),
       }),
       30000,
     )
 
-    log(`status: ${matrix.length} arquivos...`)
+    log(`status: ${matrix.length} arquivos`)
 
     const changedFiles: string[] = []
     for (const [filepath, _head, workdir, _stage] of matrix) {
-      // workdir: 0=absent, 1=unchanged, 2=modified
-      // stage: 0=absent, 1=identical, 2=modified, 3=added
       if (workdir === 2 || workdir === 0) {
         changedFiles.push(filepath)
       }
     }
 
-    // --- 3. Add + Commit (se houver mudanças) ---
+    // --- 3. Add + Commit ---
     if (changedFiles.length > 0) {
       log(`commit: ${changedFiles.length} arquivos...`)
       const now = new Date()
@@ -271,13 +244,9 @@ export class GitSync {
 
       for (const file of changedFiles) {
         try {
-          await git.add({
-            fs: this.fs,
-            dir: this.dir,
-            filepath: file,
-          })
+          await git.add({ fs: this.fs, dir: this.dir, filepath: file })
         } catch {
-          // Arquivo pode ter sido deletado entre statusMatrix e add
+          // arquivo pode ter sumido
         }
       }
 
@@ -292,22 +261,21 @@ export class GitSync {
       })
 
       log(`commit: ${sha.slice(0, 7)} — ${changedFiles.length} arquivos`)
+      await this.flushIndex()
     } else {
       log('status: nada alterado')
     }
 
-    // --- 4. Push (com timeout 20s) ---
+    // --- 4. Push ---
     log('push: enviando...')
     try {
       const result = await withTimeout(
         git.push({
           fs: this.fs,
-          http: this.httpClient,
+          http: obsidianHttp(),
           dir: this.dir,
           url: this.effectiveUrl,
           ref: 'main',
-          corsProxy: isCapacitor() ? 'https://cors.isomorphic-git.org' : undefined,
-          headers: this.authHeaders(),
         }),
         20000,
       )
@@ -316,24 +284,21 @@ export class GitSync {
         pushed = 1
         log(`push: ok → ${this.settings.remote}`)
       }
+      await this.flushIndex()
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       log(`push: ERRO — ${msg.slice(0, 120)}`)
       throw err
     }
 
-    const branch = (await git.currentBranch({ fs: this.fs, dir: this.dir })) ?? 'main'
+    const branch =
+      (await git.currentBranch({ fs: this.fs, dir: this.dir })) ?? 'main'
 
-    return {
-      pulled,
-      pushed,
-      branch,
-      commits,
-    }
+    return { pulled, pushed, branch, commits }
   }
 
   /**
-   * Retorna os últimos N commits do log local.
+   * Últimos N commits.
    */
   async recentCommits(n: number = 5): Promise<string[]> {
     try {
@@ -343,11 +308,10 @@ export class GitSync {
         depth: n,
       })
       return entries.map(
-        (e) =>
-          `${e.oid.slice(0, 7)} — ${e.commit.message.slice(0, 60)}`,
+        (e) => `${e.oid.slice(0, 7)} — ${e.commit.message.slice(0, 60)}`,
       )
     } catch {
-      return ['(sem commits ou repositório não inicializado)']
+      return ['(sem commits)']
     }
   }
 }

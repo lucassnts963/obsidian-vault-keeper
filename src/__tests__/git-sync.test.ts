@@ -1,6 +1,10 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// vi.mock factory is hoisted — must use vi.hoisted for shared state
+// Mock obsidian (requestUrl + Vault)
+vi.mock('obsidian', () => ({
+  requestUrl: vi.fn(),
+}))
+
 const { mockGit } = vi.hoisted(() => ({
   mockGit: {
     currentBranch: vi.fn(),
@@ -14,9 +18,6 @@ const { mockGit } = vi.hoisted(() => ({
 }))
 
 vi.mock('isomorphic-git', () => mockGit)
-vi.mock('isomorphic-git/http/web', () => ({
-  default: { request: vi.fn() },
-}))
 
 import { GitSync } from '../git/sync'
 import type { GitSettings } from '../settings'
@@ -24,13 +25,13 @@ import type { GitSettings } from '../settings'
 function mockVault() {
   return {
     adapter: {
-      readBinary: vi.fn(),
+      readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
       writeBinary: vi.fn(),
       remove: vi.fn(),
-      list: vi.fn(),
+      list: vi.fn().mockResolvedValue({ files: [], folders: [] }),
       mkdir: vi.fn(),
       rmdir: vi.fn(),
-      stat: vi.fn(),
+      stat: vi.fn().mockResolvedValue(null),
       basePath: '/test-vault',
     },
   } as any
@@ -87,7 +88,7 @@ describe('GitSync', () => {
       expect(result.error).toBeUndefined()
     })
 
-    it('retorna erro se git não configurado', async () => {
+    it('retorna erro se git desabilitado', async () => {
       const gs = new GitSync(vault, testSettings({ enabled: false }))
       const result = await gs.status()
       expect(result.error).toContain('desabilitado')
@@ -135,7 +136,7 @@ describe('GitSync', () => {
       expect(result.branch).toBe('main')
     })
 
-    it('continua mesmo se pull falhar (fast-forward conflict)', async () => {
+    it('continua mesmo se pull falhar', async () => {
       mockGit.currentBranch.mockResolvedValue('main')
       mockGit.pull.mockRejectedValue(new Error('fast-forward failed'))
       mockGit.statusMatrix.mockResolvedValue([])
@@ -157,28 +158,6 @@ describe('GitSync', () => {
 
       const gs = new GitSync(vault, testSettings())
       await expect(gs.sync()).rejects.toThrow('401')
-    })
-
-    it('filtra arquivos binários do status', async () => {
-      mockGit.currentBranch.mockResolvedValue('main')
-      mockGit.pull.mockResolvedValue(undefined)
-      // Mock statusMatrix já filtra pq o mock é dumb (não honra o callback filter)
-      mockGit.statusMatrix.mockResolvedValue([
-        ['note.md', 1, 2, 2],
-      ])
-      mockGit.add.mockResolvedValue(undefined)
-      mockGit.commit.mockResolvedValue('fff9999')
-      mockGit.push.mockResolvedValue({ ok: true, error: null, refs: {} })
-
-      const gs = new GitSync(vault, testSettings())
-      await gs.sync()
-
-      const addCalls = mockGit.add.mock.calls.map((c: any[]) => c[0].filepath)
-      expect(addCalls).toContain('note.md')
-      // Arquivos binários são filtrados ANTES de chegar ao add()
-      expect(addCalls).not.toContain('data.xlsx')
-      expect(addCalls).not.toContain('image.png')
-      expect(addCalls).not.toContain('doc.pdf')
     })
   })
 
