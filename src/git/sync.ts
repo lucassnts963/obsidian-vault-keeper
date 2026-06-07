@@ -109,6 +109,11 @@ export class GitSync {
       const matrix = await git.statusMatrix({
         fs: this.fs,
         dir: this.dir,
+        filter: (f: string) =>
+          f !== '.git' &&
+          !f.startsWith('.git/') &&
+          !f.startsWith('.obsidian/') &&
+          !f.startsWith('.trash/'),
       })
 
       const localChanges: string[] = []
@@ -202,7 +207,10 @@ export class GitSync {
         fs: this.fs,
         dir: this.dir,
         filter: (f: string) =>
+          f !== '.git' &&
           !f.startsWith('.git/') &&
+          !f.startsWith('.obsidian/') &&
+          !f.startsWith('.trash/') &&
           !f.endsWith('.xlsx') &&
           !f.endsWith('.xls') &&
           !f.endsWith('.pdf') &&
