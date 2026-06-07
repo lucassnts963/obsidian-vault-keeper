@@ -4,39 +4,7 @@ import type { PromiseFsClient } from 'isomorphic-git'
 import http from 'isomorphic-git/http/web'
 import type { GitSettings } from '../settings'
 import { createVaultFs } from './vault-fs'
-import { createMobileGitFs, isCapacitor, getVaultPath } from './mobile-fs'
-
-/**
- * FS composto: rotéia .git/** → gitFs, resto → vaultFs.
- * Resolve o problema do adapter do Obsidian mobile bloquear dot-dirs.
- */
-function compositeFs(vaultFs: PromiseFsClient, gitFs: PromiseFsClient): PromiseFsClient {
-  function isGit(p: string): boolean {
-    return p === '.git' || p.startsWith('.git/') || p.includes('/.git/')
-  }
-
-  function pick(p: string) {
-    const useGit = isGit(p)
-    if (useGit) console.log('[VaultKeeper fs] .git → mobile:', p)
-    return useGit ? gitFs : vaultFs
-  }
-
-  return {
-    promises: {
-      readFile: (p: string) => pick(p).promises.readFile(p),
-      writeFile: (p: string, d: Uint8Array | string) => pick(p).promises.writeFile(p, d),
-      unlink: (p: string) => pick(p).promises.unlink(p),
-      readdir: (p: string) => pick(p).promises.readdir(p),
-      mkdir: (p: string) => pick(p).promises.mkdir(p),
-      rmdir: (p: string) => pick(p).promises.rmdir(p),
-      stat: (p: string) => pick(p).promises.stat(p),
-      lstat: (p: string) => pick(p).promises.lstat!(p),
-      readlink: (p: string) => pick(p).promises.readlink!(p),
-      symlink: (t: string, p: string) => pick(p).promises.symlink!(t, p),
-      chmod: (p: string, m: number) => pick(p).promises.chmod!(p, m),
-    },
-  }
-}
+import { isCapacitor } from './mobile-fs'
 
 /**
  * Promise.race com timeout — evita que operações de rede travem indefinidamente.
@@ -85,15 +53,7 @@ export class GitSync {
   }
 
   private get fs(): PromiseFsClient {
-    const vaultFs = createVaultFs(this.vault, this.dir)
-
-    // No mobile: VaultFS puro (desktop funciona)
-    if (!isCapacitor()) return vaultFs
-
-    // Mobile: fs híbrido — .git/ pelo Capacitor, working tree pelo VaultFS
-    const gitFs = createMobileGitFs(getVaultPath())
-
-    return compositeFs(vaultFs, gitFs)
+    return createVaultFs(this.vault, this.dir)
   }
 
   private get httpClient() {
