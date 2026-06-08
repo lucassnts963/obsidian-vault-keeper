@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest'
+import { requestUrl } from '../__mocks__/obsidian'
 
 // ═══════════════════════════════════════════════════════════════════
 // Tests for base64.ts (chunked encode/decode — replaces btoa/atob)
@@ -180,21 +181,14 @@ describe('sha256', () => {
 // Tests for GitHubSync (with mocked adapters)
 // ═══════════════════════════════════════════════════════════════════
 
-// Mock obsidian module — must be before any import that uses it
-vi.mock('obsidian', () => ({
-  requestUrl: vi.fn(),
-  Notice: vi.fn().mockImplementation(function (this: any, msg: string, _timeout?: number) {
-    this.message = msg
-    this.setMessage = vi.fn()
-    this.hide = vi.fn()
-  }),
-}))
+// obsidian is mocked via vitest.config.ts alias to src/__mocks__/obsidian.ts
 
 describe('GitHubSync', () => {
   let GitHubSync: any
   let mockAdapter: any
 
   beforeEach(() => {
+    requestUrl.mockReset()
     mockAdapter = {
       read: vi.fn().mockRejectedValue(new Error('not found')),
       write: vi.fn().mockResolvedValue(undefined),
@@ -272,7 +266,7 @@ describe('GitHubSync', () => {
 
   describe('push', () => {
     it('detects no changes when vault is empty', async () => {
-      const { requestUrl } = await import('obsidian')
+
       const sync = new GitHubSync(
         { adapter: mockAdapter },
         { remote: 'https://github.com/user/repo', token: 'ghp_test', authorName: 'Test', authorEmail: 'test@test.com', enabled: true, autoSyncMinutes: 0 },
@@ -288,8 +282,8 @@ describe('GitHubSync', () => {
 
   describe('pull', () => {
     it('handles branch not found gracefully', async () => {
-      const { requestUrl } = await import('obsidian')
-      ;(requestUrl as any).mockRejectedValue(new Error('Not Found'))
+
+      requestUrl.mockRejectedValue(new Error('Not Found'))
 
       const sync = new GitHubSync(
         { adapter: mockAdapter },
@@ -304,8 +298,7 @@ describe('GitHubSync', () => {
 
   describe('status', () => {
     it('reports no changes on fresh vault', async () => {
-      const { requestUrl } = await import('obsidian')
-
+      
       mockAdapter.list.mockResolvedValue({ files: [], folders: [] })
 
       const sync = new GitHubSync(
@@ -444,13 +437,6 @@ describe('GitHubSync', () => {
   })
 
   describe('pushFile (single file push)', () => {
-    let requestUrl: any
-
-    beforeEach(async () => {
-      const obs = await import('obsidian')
-      requestUrl = obs.requestUrl
-      ;(requestUrl as any).mockReset()
-    })
 
     it('pushes a single file to GitHub', async () => {
       const sync = new GitHubSync(
@@ -461,13 +447,13 @@ describe('GitHubSync', () => {
 
       const fileContent = new TextEncoder().encode('hello vault')
       mockAdapter.readBinary.mockResolvedValueOnce(fileContent.buffer)
-      ;(requestUrl as any).mockResolvedValueOnce({ status: 200, json: { sha: 'new-remote-sha' } })
+      ;requestUrl.mockResolvedValueOnce({ status: 200, json: { sha: 'new-remote-sha' } })
 
       const result = await sync.pushFile('note.md')
 
       expect(result).toBe('note.md')
       expect(requestUrl).toHaveBeenCalledTimes(1)
-      const calledUrl = (requestUrl as any).mock.calls[0][0].url
+      const calledUrl = requestUrl.mock.calls[0][0].url
       expect(calledUrl).toContain('/contents/note.md')
     })
 
@@ -495,19 +481,12 @@ describe('GitHubSync', () => {
       expect(result).toBe('existing.md')
 
       expect(requestUrl).toHaveBeenCalledTimes(2)
-      const secondCallBody = JSON.parse((requestUrl as any).mock.calls[1][0].body)
+      const secondCallBody = JSON.parse(requestUrl.mock.calls[1][0].body)
       expect(secondCallBody.sha).toBe('remote-sha-123')
     })
   })
 
   describe('quickStatus (fast remote check)', () => {
-    let requestUrl: any
-
-    beforeEach(async () => {
-      const obs = await import('obsidian')
-      requestUrl = obs.requestUrl
-      ;(requestUrl as any).mockReset()
-    })
 
     it('reports remote ahead when SHA differs', async () => {
       const sync = new GitHubSync(
@@ -516,7 +495,7 @@ describe('GitHubSync', () => {
         '/test',
       )
       ;(sync as any).state = { lastRemoteSHA: 'old-sha', files: {} }
-      ;(requestUrl as any).mockResolvedValueOnce({
+      ;requestUrl.mockResolvedValueOnce({
         status: 200,
         json: { object: { sha: 'new-sha' } },
       })
@@ -533,7 +512,7 @@ describe('GitHubSync', () => {
         '/test',
       )
       ;(sync as any).state = { lastRemoteSHA: 'same-sha', files: {} }
-      ;(requestUrl as any).mockResolvedValueOnce({
+      ;requestUrl.mockResolvedValueOnce({
         status: 200,
         json: { object: { sha: 'same-sha' } },
       })
@@ -548,7 +527,7 @@ describe('GitHubSync', () => {
         { remote: 'https://github.com/user/repo', token: 'ghp_test', authorName: 'Test', authorEmail: 'test@test.com', enabled: true, autoSyncMinutes: 0 },
         '/test',
       )
-      ;(requestUrl as any).mockRejectedValueOnce(new Error('Network error'))
+      ;requestUrl.mockRejectedValueOnce(new Error('Network error'))
 
       const status = await sync.quickStatus()
       expect(status.remoteAhead).toBe(false)

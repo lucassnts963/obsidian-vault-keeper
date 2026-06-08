@@ -22,40 +22,50 @@ export interface LLMProvider {
 export function createProvider(settings: LLMSettings): LLMProvider | null {
   if (!settings.endpoint || !settings.model) return null
 
-  const baseUrl = settings.endpoint.replace(/\/+$/, '')
+  let baseUrl = settings.endpoint.replace(/\/+$/, '')
+  if (!baseUrl.endsWith('/v1') && !baseUrl.includes('/v1/')) {
+    baseUrl += '/v1'
+  }
 
   return {
     async chat(messages, options = {}) {
       const url = `${baseUrl}/chat/completions`
 
-      const body: Record<string, unknown> = {
-        model: settings.model,
-        messages,
-        temperature: options.temperature ?? 0.3,
-        max_tokens: options.maxTokens ?? settings.maxTokens ?? 4096,
-      }
+      const controller = new AbortController()
+      const timeout = setTimeout(() => controller.abort(), 60000)
 
-      const headers: Record<string, string> = {
-        'Content-Type': 'application/json',
-      }
-      if (settings.apiKey) {
-        headers['Authorization'] = `Bearer ${settings.apiKey}`
-      }
+      try {
+        const body: Record<string, unknown> = {
+          model: settings.model,
+          messages,
+          temperature: options.temperature ?? 0.3,
+          max_tokens: options.maxTokens ?? settings.maxTokens ?? 4096,
+        }
 
-      // For Ollama, the API is OpenAI-compatible at /v1/chat/completions
-      const response = await fetch(url, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify(body),
-      })
+        const headers: Record<string, string> = {
+          'Content-Type': 'application/json',
+        }
+        if (settings.apiKey) {
+          headers['Authorization'] = `Bearer ${settings.apiKey}`
+        }
 
-      if (!response.ok) {
-        const err = await response.text()
-        throw new Error(`LLM error ${response.status}: ${err.slice(0, 200)}`)
+        const response = await fetch(url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(body),
+          signal: controller.signal,
+        })
+
+        if (!response.ok) {
+          const err = await response.text()
+          throw new Error(`LLM error ${response.status}: ${err.slice(0, 200)}`)
+        }
+
+        const data = await response.json()
+        return data.choices[0].message.content
+      } finally {
+        clearTimeout(timeout)
       }
-
-      const data = await response.json()
-      return data.choices[0].message.content
     },
 
     async models() {
