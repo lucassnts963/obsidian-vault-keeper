@@ -1,9 +1,9 @@
 {
   "id": "vault-keeper",
   "name": "Vault Keeper",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "minAppVersion": "1.5.0",
-  "description": "Metodologia completa de conhecimento: inbox, ingest com LLM, query, lint, cross-ingest, git sync via isomorphic-git",
+  "description": "Metodologia completa de conhecimento: inbox, ingest com LLM, query, lint, cross-ingest, GitHub sync",
   "author": "Lucas Santos",
   "isDesktopOnly": false
 }
