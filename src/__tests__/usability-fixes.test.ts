@@ -21,6 +21,7 @@ function mockVault() {
     read: vi.fn(async (file: any) => { const p = file.path || file; return files[p] || '' }),
     create: vi.fn(async (path: string, content: string) => { files[path] = content }),
     delete: vi.fn(async (file: any) => { delete files[file.path || file] }),
+    modify: vi.fn(async (file: any, content: string) => { const p = file.path || file; files[p] = content }),
   }
 }
 

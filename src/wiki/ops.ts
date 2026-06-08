@@ -25,7 +25,7 @@ export class WikiOps {
   async reject(file: TFile): Promise<void> {
     const content = await this.vault.read(file)
     const updated = this.setFrontmatterStatus(content, 'rejected')
-    await this.vault.adapter.write(file.path, updated)
+    await this.vault.modify(file, updated)
   }
 
   /** Atualiza ou adiciona campo status no frontmatter YAML */
@@ -165,7 +165,7 @@ export class WikiOps {
     await this.logOperation('ingest', safeTitle, file.path)
 
     const updatedSource = this.setFrontmatterStatus(content, 'ingested')
-    await this.vault.adapter.write(file.path, updatedSource)
+    await this.vault.modify(file, updatedSource)
   }
 
   private async updateIndex(title: string, path: string, category: string, tags: string[]) {

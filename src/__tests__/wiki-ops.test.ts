@@ -61,6 +61,10 @@ function mockVault() {
       files[newPath] = files[oldPath]
       delete files[oldPath]
     }),
+    modify: vi.fn(async (file: any, content: string) => {
+      const path = typeof file === 'string' ? file : file.path
+      files[path] = content
+    }),
   }
 }
 
