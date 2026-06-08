@@ -1,10 +1,7 @@
-// Polyfill Buffer — módulo separado garante execução antes dos demais imports
-import './polyfill'
-
 import { Notice, Plugin, WorkspaceLeaf, addIcon, setIcon } from 'obsidian'
 import { VaultKeeperSettings, DEFAULT_SETTINGS } from './settings'
 import { VaultKeeperSettingTab } from './settings-tab'
-import { GitSync, type StatusResult } from './git/sync'
+import { GitHubSync } from './github/sync'
 import { InboxView, INBOX_VIEW_TYPE } from './views/inbox-view'
 import { ChatView, CHAT_VIEW_TYPE } from './views/chat-view'
 import { LintView, LINT_VIEW_TYPE } from './views/lint-view'
@@ -12,13 +9,12 @@ import { LLMProvider, createProvider } from './llm/provider'
 import { WikiOps } from './wiki/ops'
 import { Logger } from './wiki/log'
 
-/** Ícone SVG customizado para sync */
 const SYNC_ICON =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>'
 
 export default class VaultKeeperPlugin extends Plugin {
   declare settings: VaultKeeperSettings
-  git!: GitSync
+  github!: GitHubSync | null
   llm!: LLMProvider | null
   wiki!: WikiOps
   logger!: Logger
@@ -27,14 +23,35 @@ export default class VaultKeeperPlugin extends Plugin {
   private autoSyncInterval: ReturnType<typeof setInterval> | null = null
 
   async onload() {
-    try {
     await this.loadSettings()
 
     addIcon('vault-keeper-sync', SYNC_ICON)
     this.addSettingTab(new VaultKeeperSettingTab(this.app, this))
 
-    // Git sync via isomorphic-git
-    this.git = new GitSync(this.app.vault, this.settings)
+    // GitHub sync (REST API, sem isomorphic-git)
+    if (this.settings.git.enabled && this.settings.git.remote && this.settings.git.token) {
+      try {
+        this.github = new GitHubSync(
+          this.app.vault,
+          {
+            enabled: this.settings.git.enabled,
+            remote: this.settings.git.remote,
+            token: this.settings.git.token,
+            authorName: this.settings.git.authorName || 'Vault Keeper',
+            authorEmail: this.settings.git.authorEmail || 'vault@keeper.local',
+            autoSyncMinutes: this.settings.git.autoSyncMinutes,
+          },
+          (this.app.vault.adapter as any).basePath
+            ? `${(this.app.vault.adapter as any).basePath}/.obsidian/vault-keeper`
+            : `${(this.app as any).appId}/vault-keeper`,
+        )
+      } catch (err: any) {
+        new Notice(`Vault Keeper: erro ao iniciar sync — ${err.message}`, 8000)
+        this.github = null
+      }
+    } else {
+      this.github = null
+    }
 
     // LLM provider (agnóstico)
     this.llm = createProvider(this.settings.llm)
@@ -66,12 +83,12 @@ export default class VaultKeeperPlugin extends Plugin {
     })
     this.addCommand({
       id: 'git-sync',
-      name: 'Sincronizar (git pull/push)',
+      name: 'Sincronizar (GitHub API)',
       callback: () => this.doSync(),
     })
     this.addCommand({
       id: 'git-status',
-      name: 'Status do git',
+      name: 'Status do sync',
       callback: () => this.showStatus(),
     })
     this.addCommand({
@@ -84,29 +101,20 @@ export default class VaultKeeperPlugin extends Plugin {
     this.addRibbonIcon('inbox', 'Vault Keeper: Inbox', () => this.activateView(INBOX_VIEW_TYPE))
     this.addRibbonIcon('message-square', 'Vault Keeper: Chat', () => this.activateView(CHAT_VIEW_TYPE))
 
-    // Ribbon com sync (só aparece se git habilitado)
-    if (this.settings.git.enabled) {
+    if (this.github) {
       this.addRibbonIcon('vault-keeper-sync', 'Vault Keeper: Sync', () => this.doSync())
     }
 
     // ── Status bar ──────────────────────────────────────
     this.statusBarEl = this.addStatusBarItem()
     this.statusBarEl.addClass('vault-keeper-status')
-    this.statusBarEl.setText('git: …')
-    // Não bloqueia o startup — atualiza assíncrona
-    this.refreshStatusBar()
+    this.statusBarEl.setText(this.github ? 'github: ...' : '')
+    if (this.github) this.refreshStatusBar()
 
     // ── Auto-sync ───────────────────────────────────────
     this.setupAutoSync()
-    } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err)
-      const stack = err instanceof Error ? err.stack : ''
-      new Notice(`Vault Keeper ERRO: ${msg}\n${(stack || '').slice(0, 200)}`, 0)
-      throw err
-    }
   }
 
-  /** Ativa uma view (abre se não existir) */
   async activateView(type: string) {
     const { workspace } = this.app
     let leaf: WorkspaceLeaf | null = workspace.getLeavesOfType(type)[0]
@@ -118,104 +126,92 @@ export default class VaultKeeperPlugin extends Plugin {
   }
 
   // ═══════════════════════════════════════════════════════
-  //  Git Sync
+  //  Sync (GitHub REST API)
   // ═══════════════════════════════════════════════════════
 
-  /** Executa sync completo e notifica o usuário */
   async doSync(): Promise<void> {
-    if (!this.settings.git.enabled) {
-      new Notice('⚠️ Git sync desabilitado. Configure nas settings.')
+    if (!this.github) {
+      new Notice('⚠️ GitHub sync não configurado. Vá nas settings.')
       return
     }
 
-    let notice = new Notice('🔄 Sincronizando...', 0)
+    const notice = new Notice('🔄 Sincronizando...', 0)
 
     try {
-      const result = await this.git.sync((phase) => {
-        // Atualiza a Notice com a fase atual
+      // Primeiro pull, depois push
+      const pullMsgs = await this.github.pull((phase) => {
+        notice.setMessage(`🔄 ${phase}`)
+      })
+      const pushMsgs = await this.github.push((phase) => {
         notice.setMessage(`🔄 ${phase}`)
       })
       notice.hide()
 
-      const lines = [
-        `✅ Sync concluído (${result.branch})`,
-        ...result.commits.map((c) => `   ${c}`),
+      const allMsgs = [
+        '✅ Sync concluído',
+        ...pullMsgs.map((m) => `   ${m}`),
+        ...pushMsgs.map((m) => `   ${m}`),
       ]
-      new Notice(lines.join('\n'), 8000)
-
+      new Notice(allMsgs.join('\n'), 8000)
       this.refreshStatusBar()
-    } catch (err) {
+    } catch (err: any) {
       notice.hide()
-      const msg = err instanceof Error ? err.message : String(err)
-      new Notice(`❌ Sync falhou: ${msg.slice(0, 120)}`, 8000)
-      this.refreshStatusBar()
+      new Notice(`❌ Sync falhou: ${err.message?.slice(0, 200)}`, 8000)
     }
   }
 
-  /** Mostra status rápido via Notice */
   async showStatus(): Promise<void> {
-    if (!this.settings.git.enabled) {
-      new Notice('⚠️ Git sync desabilitado')
-      return
-    }
-
-    const status = await this.git.status()
-
-    if (status.error) {
-      new Notice(`⚠️ Git: ${status.error.slice(0, 100)}`, 6000)
-      return
-    }
-
-    const dirty = status.localChanges.length > 0
-    const icon = dirty ? '📝' : '✅'
-    const parts = [
-      `${icon} branch: ${status.branch}`,
-      `   mudanças locais: ${status.localChanges.length}`,
-      `   commits não enviados: ${status.unpushedCommits}`,
-    ]
-    new Notice(parts.join('\n'), 5000)
-  }
-
-  /** Atualiza a status bar com branch e estado */
-  async refreshStatusBar(): Promise<void> {
-    if (!this.statusBarEl) return
-
-    if (!this.settings.git.enabled) {
-      this.statusBarEl.setText('')
+    if (!this.github) {
+      new Notice('⚠️ GitHub sync não configurado')
       return
     }
 
     try {
-      const status = await this.git.status()
-
-      if (status.error) {
-        this.statusBarEl.setText(`git: ⚠️`)
-        this.statusBarEl.setAttr('aria-label', status.error)
-        return
+      const status = await this.github.status()
+      const parts = [
+        `📝 branch: ${status.branch}`,
+        `   mudanças locais: ${status.localChanges.length}`,
+        `   remoto à frente: ${status.remoteAhead ? 'sim' : 'não'}`,
+      ]
+      if (status.localChanges.length > 0) {
+        parts.push('   arquivos:')
+        for (const f of status.localChanges.slice(0, 10)) {
+          parts.push(`     - ${f}`)
+        }
+        if (status.localChanges.length > 10) {
+          parts.push(`     ... +${status.localChanges.length - 10} mais`)
+        }
       }
-
-      const dirty = status.localChanges.length > 0
-      const icon = dirty ? '📝' : '✅'
-      this.statusBarEl.setText(`git: ${icon} ${status.branch}`)
-      this.statusBarEl.setAttr(
-        'aria-label',
-        `${status.branch} — ${status.localChanges.length} mudanças, ${status.unpushedCommits} commits pendentes`,
-      )
-    } catch {
-      this.statusBarEl.setText('git: …')
+      new Notice(parts.join('\n'), 8000)
+    } catch (err: any) {
+      new Notice(`⚠️ Status: ${err.message?.slice(0, 200)}`, 6000)
     }
   }
 
-  /** Timer de auto-sync */
+  async refreshStatusBar(): Promise<void> {
+    if (!this.statusBarEl || !this.github) return
+
+    try {
+      const status = await this.github.status()
+      const dirty = status.localChanges.length > 0
+      this.statusBarEl.setText(`github: ${dirty ? '📝' : '✅'} main`)
+      this.statusBarEl.setAttr(
+        'aria-label',
+        `${status.localChanges.length} mudanças, remoto ${status.remoteAhead ? 'tem' : 'sem'} novidades`,
+      )
+    } catch {
+      this.statusBarEl.setText('github: ⚠️')
+    }
+  }
+
   setupAutoSync(): void {
-    // Limpa timer anterior
     if (this.autoSyncInterval) {
       clearInterval(this.autoSyncInterval)
       this.autoSyncInterval = null
     }
 
     const minutes = this.settings.git.autoSyncMinutes
-    if (minutes > 0 && this.settings.git.enabled) {
+    if (minutes > 0 && this.github) {
       this.autoSyncInterval = setInterval(
         () => this.doSync(),
         minutes * 60 * 1000,
@@ -234,7 +230,6 @@ export default class VaultKeeperPlugin extends Plugin {
 
   async saveSettings() {
     await this.saveData(this.settings)
-    // Recria auto-sync timer se configuração mudou
     this.setupAutoSync()
     this.refreshStatusBar()
   }
