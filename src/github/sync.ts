@@ -41,6 +41,38 @@ async function sha256(content: ArrayBuffer): Promise<string> {
 }
 
 /**
+ * ArrayBuffer → base64 (binary-safe, suporta UTF-8).
+ */
+function bytesToBase64(buf: ArrayBuffer): string {
+  const bytes = new Uint8Array(buf)
+  let binary = ''
+  for (let i = 0; i < bytes.length; i++) {
+    binary += String.fromCharCode(bytes[i])
+  }
+  return btoa(binary)
+}
+
+/**
+ * Base64 → ArrayBuffer (binary-safe, reverso do bytesToBase64).
+ */
+function base64ToBytes(base64: string): ArrayBuffer {
+  const binary = atob(base64)
+  const bytes = new Uint8Array(binary.length)
+  for (let i = 0; i < binary.length; i++) {
+    bytes[i] = binary.charCodeAt(i)
+  }
+  return bytes.buffer
+}
+
+/**
+ * Base64 → string UTF-8.
+ */
+function base64ToUtf8(base64: string): string {
+  const buf = base64ToBytes(base64)
+  return new TextDecoder('utf-8').decode(buf)
+}
+
+/**
  * GitHub REST API sync — sem isomorphic-git, sem Buffer, sem polyfill.
  * Usa requestUrl() do Obsidian que funciona em desktop e mobile (bypassa CSP).
  */
@@ -246,7 +278,7 @@ export class GitHubSync {
     for (const { path, hash } of changed) {
       const file = this.vault.adapter as DataAdapter & { readBinary(path: string): Promise<ArrayBuffer> }
       const content = await file.readBinary(path)
-      const base64 = btoa(String.fromCharCode(...new Uint8Array(content)))
+      const base64 = bytesToBase64(content)
       const existing = this.state.files[path]
 
       try {
@@ -341,7 +373,7 @@ export class GitHubSync {
         const file = await this.apiGet(`/contents/${f.path}?ref=main`)
         if (!file.content) continue
 
-        const content = atob(file.content.replace(/\n/g, ''))
+        const content = base64ToUtf8(file.content.replace(/\n/g, ''))
         await this.vault.adapter.write(f.path, content)
         this.state.files[f.path] = { sha: f.sha, mtime: Date.now() }
         downloaded++
