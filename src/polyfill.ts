@@ -1,9 +1,11 @@
-import { Buffer } from 'buffer'
+import { Buffer as BufferImpl } from 'buffer'
 
-// Garante que o Buffer exista no escopo global (Mobile e Desktop)
-if (typeof globalThis.Buffer === 'undefined') {
-  ;(globalThis as any).Buffer = Buffer
+const g = globalThis as any
+const w = typeof window !== 'undefined' ? (window as any) : null
+
+if (typeof g.Buffer === 'undefined') {
+  g.Buffer = BufferImpl
 }
-
-// Exporta o Buffer para o esbuild mapear a variável
-export { Buffer }
+if (w && typeof w.Buffer === 'undefined') {
+  w.Buffer = BufferImpl
+}

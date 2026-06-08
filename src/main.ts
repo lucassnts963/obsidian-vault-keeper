@@ -1,3 +1,6 @@
+// Polyfill Buffer — módulo separado garante execução antes dos demais imports
+import './polyfill'
+
 import { Notice, Plugin, WorkspaceLeaf, addIcon, setIcon } from 'obsidian'
 import { VaultKeeperSettings, DEFAULT_SETTINGS } from './settings'
 import { VaultKeeperSettingTab } from './settings-tab'
