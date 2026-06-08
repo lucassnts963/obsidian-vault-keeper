@@ -1,6 +1,6 @@
-import { ItemView, WorkspaceLeaf, TFile } from 'obsidian'
+import { ItemView, WorkspaceLeaf, TFile, Notice } from 'obsidian'
 import type VaultKeeperPlugin from '../main'
-import { card, badge, center, button, normalizePath, parseStatus, ensureDir } from './ui'
+import { card, badge, center, button, normalizePath, parseStatus } from './ui'
 
 export const INBOX_VIEW_TYPE = 'vault-keeper-inbox'
 
@@ -71,7 +71,7 @@ export class InboxView extends ItemView {
     const bar = this.contentEl.createEl('div')
     bar.style.marginBottom = '8px'
 
-    const all = this.filter === 'all' ? this.items.length : 0
+    const all = this.items.length
     const inbox = this.items.filter(i => i.status === 'inbox').length
     const approved = this.items.filter(i => i.status === 'approved').length
     const rejected = this.items.filter(i => i.status === 'rejected').length
@@ -112,20 +112,32 @@ export class InboxView extends ItemView {
         inbox: 'var(--color-orange)',
         approved: 'var(--color-green)',
         rejected: 'var(--color-red)',
+        ingested: '#4a9eff',
       }
       badge(item.status, colors[item.status] || '#888', c)
 
       const info = c.createEl('div')
       info.style.flex = '1'
-      info.createEl('div', { text: item.title })
+      info.style.cursor = 'pointer'
+      const titleEl = info.createEl('div', { text: item.title })
+      titleEl.style.color = 'var(--text-accent)'
+      titleEl.style.textDecoration = 'underline'
       info.createEl('small', { text: item.file.path }).style.color = 'var(--text-muted)'
+      titleEl.addEventListener('click', () => {
+        this.plugin.app.workspace.openLinkText(item.file.path, '', true)
+      })
 
       const actions = c.createEl('div')
 
       if (item.status === 'approved') {
         button('Ingest', false, async () => {
-          await this.plugin.wiki.ingestFile(item.file, this.plugin.llm)
-          await this.refresh()
+          try {
+            await this.plugin.wiki.ingestFile(item.file, this.plugin.llm)
+            new Notice(`Ingest concluído: ${item.title}`)
+            await this.refresh()
+          } catch (err: any) {
+            new Notice(`Falha no ingest: ${err.message}`, 8000)
+          }
         }, actions)
       }
 

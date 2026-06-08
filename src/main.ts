@@ -133,6 +133,26 @@ export default class VaultKeeperPlugin extends Plugin {
       name: 'Ingest: arquivo atual',
       callback: () => this.wiki.ingestFile(this.app.workspace.getActiveFile(), this.llm),
     })
+    this.addCommand({
+      id: 'approve-current',
+      name: 'Approvar: arquivo atual',
+      callback: async () => {
+        const file = this.app.workspace.getActiveFile()
+        if (!file) { new Notice('Nenhum arquivo aberto'); return }
+        await this.wiki.approve(file)
+        new Notice(`Aprovado: ${file.path}`)
+      },
+    })
+    this.addCommand({
+      id: 'reject-current',
+      name: 'Rejeitar: arquivo atual',
+      callback: async () => {
+        const file = this.app.workspace.getActiveFile()
+        if (!file) { new Notice('Nenhum arquivo aberto'); return }
+        await this.wiki.reject(file)
+        new Notice(`Rejeitado: ${file.path}`)
+      },
+    })
 
     this.addRibbonIcon('inbox', 'Vault Keeper: Inbox', () => this.activateView(INBOX_VIEW_TYPE))
     this.addRibbonIcon('message-square', 'Vault Keeper: Chat', () => this.activateView(CHAT_VIEW_TYPE))

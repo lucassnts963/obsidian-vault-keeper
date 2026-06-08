@@ -45,9 +45,10 @@ export class WikiOps {
     return `---\nstatus: ${status}\n---\n\n${content}`
   }
 
-  /** Lê index + páginas relevantes do wiki para contexto do LLM */
-  async gatherContext(question: string): Promise<string> {
+  /** Lê index + páginas relevantes do wiki para contexto do LLM, com traversal de links */
+  async gatherContext(question: string, maxPages = 8, linkDepth = 1): Promise<string> {
     const parts: string[] = []
+    const seen = new Set<string>()
 
     try {
       const index = await this.vault.adapter.read(this.settings.indexPath)
@@ -55,6 +56,8 @@ export class WikiOps {
     } catch {}
 
     const keywords = question.toLowerCase().split(/\s+/).filter(w => w.length > 3)
+    let seedPaths: string[] = []
+
     try {
       const list = await this.vault.adapter.list(this.settings.wikiPath)
       const mdFiles = list.files.filter((f: string) => f.endsWith('.md'))
@@ -64,15 +67,49 @@ export class WikiOps {
         const path = `${this.settings.wikiPath}/${f}`
         try {
           const page = await this.vault.adapter.read(path)
-          const lower = page.toLowerCase()
-          if (keywords.some(kw => lower.includes(kw))) {
-            parts.push(`## ${f}\n${page.slice(0, 2000)}`)
+          if (keywords.some(kw => page.toLowerCase().includes(kw))) {
+            seedPaths.push(path)
             matched++
-            if (matched >= 5) break
+            if (matched >= maxPages) break
           }
         } catch {}
       }
     } catch {}
+
+    const toProcess = [...seedPaths]
+    for (let depth = 0; depth <= linkDepth; depth++) {
+      const nextWave: string[] = []
+      for (const currentPath of toProcess) {
+        if (parts.length - 1 >= maxPages) break
+        if (seen.has(currentPath)) continue
+        seen.add(currentPath)
+
+        try {
+          const page = await this.vault.adapter.read(currentPath)
+          const fileName = currentPath.replace(this.settings.wikiPath + '/', '')
+          parts.push(`## ${fileName}\n${page.slice(0, 2000)}`)
+
+          if (depth < linkDepth) {
+            const linkRegex = /\[\[([^\]|#]+)(?:[|#][^\]]+)?\]\]/g
+            let match
+            while ((match = linkRegex.exec(page)) !== null) {
+              let linkTarget = match[1].trim()
+              if (linkTarget.startsWith(this.settings.wikiPath + '/')) {
+                linkTarget = linkTarget.slice(this.settings.wikiPath.length + 1)
+              }
+              const resolvedPath = linkTarget.endsWith('.md')
+                ? `${this.settings.wikiPath}/${linkTarget}`
+                : `${this.settings.wikiPath}/${linkTarget}.md`
+              if (!seen.has(resolvedPath) && !toProcess.includes(resolvedPath)) {
+                nextWave.push(resolvedPath)
+              }
+            }
+          }
+        } catch {}
+      }
+      toProcess.length = 0
+      toProcess.push(...nextWave)
+    }
 
     if (parts.length === 0) return ''
     return parts.join('\n\n---\n\n')
@@ -126,6 +163,9 @@ export class WikiOps {
 
     await this.updateIndex(safeTitle, wikiPath, safeCategory, safeTags)
     await this.logOperation('ingest', safeTitle, file.path)
+
+    const updatedSource = this.setFrontmatterStatus(content, 'ingested')
+    await this.vault.adapter.write(file.path, updatedSource)
   }
 
   private async updateIndex(title: string, path: string, category: string, tags: string[]) {
