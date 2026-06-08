@@ -1,13 +1,10 @@
 import { ItemView, WorkspaceLeaf } from 'obsidian'
 import type VaultKeeperPlugin from '../main'
+import { card, badge, center, normalizePath } from './ui'
 
 export const LINT_VIEW_TYPE = 'vault-keeper-lint'
 
-interface LintIssue {
-  severity: 'error' | 'warning'
-  page: string
-  description: string
-}
+interface LintIssue { severity: 'error' | 'warning'; page: string; description: string }
 
 export class LintView extends ItemView {
   plugin: VaultKeeperPlugin
@@ -23,9 +20,13 @@ export class LintView extends ItemView {
 
   async onOpen() {
     this.contentEl.empty()
+    center('Auditando...', this.contentEl)
+
     const issues = await this.runLint()
+    this.contentEl.empty()
+
     if (issues.length === 0) {
-      this.contentEl.createEl('p', { text: 'Nenhum problema encontrado' })
+      center('Nenhum problema encontrado', this.contentEl)
       return
     }
     this.renderReport(issues)
@@ -36,74 +37,78 @@ export class LintView extends ItemView {
     const { vault } = this.plugin.app
     const wikiPath = this.plugin.settings.wikiPath
 
+    let list: { files: string[]; folders: string[] }
     try {
-      const list = await vault.adapter.list(wikiPath)
-      const mdFiles = list.files.filter((f: string) => f.endsWith('.md'))
+      list = await vault.adapter.list(wikiPath)
+    } catch {
+      try { await vault.adapter.mkdir(wikiPath) } catch {}
+      return issues
+    }
 
-      const pageContents: Record<string, string> = {}
-      for (const f of mdFiles) {
-        const path = `${wikiPath}/${f}`
-        try {
-          const content = await vault.adapter.read(path)
-          pageContents[f] = content
-        } catch {
-          issues.push({ severity: 'error', page: f, description: 'Não foi possível ler o arquivo' })
-        }
+    const mdFiles = list.files.filter((f: string) => f.endsWith('.md'))
+    if (mdFiles.length === 0) return issues
+
+    const pageContents: Record<string, string> = {}
+    for (const f of mdFiles) {
+      try {
+        const path = normalizePath(wikiPath, f)
+        pageContents[f] = await vault.adapter.read(path)
+      } catch {
+        issues.push({ severity: 'error', page: f, description: 'Não foi possível ler o arquivo' })
       }
+    }
 
-      for (const f of mdFiles) {
-        const content = pageContents[f]
-        if (!content) continue
-
-        if (!content.startsWith('---')) {
-          issues.push({ severity: 'error', page: f, description: 'Frontmatter YAML inválido (não começa com ---)' })
-          continue
-        }
-        const end = content.indexOf('---', 3)
-        if (end === -1) {
-          issues.push({ severity: 'error', page: f, description: 'Frontmatter YAML não fechado' })
-          continue
-        }
+    // Frontmatter check
+    for (const f of mdFiles) {
+      const content = pageContents[f]
+      if (!content) continue
+      if (!content.startsWith('---')) {
+        issues.push({ severity: 'error', page: f, description: 'Frontmatter YAML inválido (não começa com ---)' })
+        continue
       }
-
-      const links: Record<string, string[]> = {}
-      for (const f of mdFiles) {
-        const content = pageContents[f]
-        if (!content) continue
-        const refs = content.match(/\[\[([^\]]+)\]\]/g)
-        if (refs) links[f] = refs.map(r => r.slice(2, -2).split('|')[0].trim())
-        else links[f] = []
+      if (content.indexOf('---', 3) === -1) {
+        issues.push({ severity: 'error', page: f, description: 'Frontmatter YAML não fechado' })
       }
+    }
 
-      const linkedTo: Set<string> = new Set()
-      for (const [, refs] of Object.entries(links)) {
-        for (const ref of refs) {
-          const refFile = ref.split('/').pop() || ''
-          linkedTo.add(refFile + '.md')
-          linkedTo.add(ref + '.md')
-        }
+    // Extract links
+    const links: Record<string, string[]> = {}
+    for (const f of mdFiles) {
+      const content = pageContents[f]
+      if (!content) continue
+      const refs = content.match(/\[\[([^\]]+)\]\]/g)
+      links[f] = refs ? refs.map(r => r.slice(2, -2).split('|')[0].split('/').pop()!.trim()) : []
+    }
+
+    // Build linked-to set
+    const linkedTo = new Set<string>()
+    for (const [, refs] of Object.entries(links)) {
+      for (const ref of refs) {
+        linkedTo.add(ref + '.md')
       }
+    }
 
+    // Orphan detection — no threshold, detects with any number of pages
+    if (Object.keys(links).length >= 1) {
       for (const f of mdFiles) {
-        if (!linkedTo.has(f) && Object.keys(links).length > 1) {
+        if (!linkedTo.has(f) && !linkedTo.has(f.replace('.md', ''))) {
           issues.push({ severity: 'warning', page: f, description: 'Página órfã (sem links de entrada)' })
         }
       }
+    }
 
-      try {
-        const indexPath = this.plugin.settings.indexPath
-        const indexContent = await vault.adapter.read(indexPath)
-        for (const f of mdFiles) {
-          if (!indexContent.includes(f)) {
-            issues.push({ severity: 'warning', page: f, description: 'Página ausente do index.md' })
-          }
+    // Index check
+    try {
+      const indexPath = this.plugin.settings.indexPath
+      const indexContent = await vault.adapter.read(indexPath)
+      for (const f of mdFiles) {
+        const name = f.replace('.md', '')
+        if (!indexContent.includes(name) && !indexContent.includes(f)) {
+          issues.push({ severity: 'warning', page: f, description: 'Página ausente do index.md' })
         }
-      } catch {
-        issues.push({ severity: 'warning', page: 'index.md', description: 'Index não encontrado' })
       }
-
     } catch {
-      issues.push({ severity: 'error', page: wikiPath, description: 'Não foi possível listar o diretório wiki' })
+      issues.push({ severity: 'warning', page: 'index.md', description: 'Index não encontrado' })
     }
 
     return issues
@@ -112,18 +117,17 @@ export class LintView extends ItemView {
   private renderReport(issues: LintIssue[]) {
     this.contentEl.createEl('h3', { text: `Auditoria — ${issues.length} problemas` })
 
-    const table = this.contentEl.createEl('div')
-
     for (const issue of issues) {
-      const row = table.createEl('div')
+      const c = card(this.contentEl)
+      c.style.display = 'flex'
+      c.style.alignItems = 'center'
 
-      const badge = row.createEl('span')
-      badge.textContent = issue.severity === 'error' ? 'ERRO' : 'WARN'
-      badge.style.color = issue.severity === 'error' ? 'red' : 'orange'
-      badge.style.marginRight = '8px'
+      const color = issue.severity === 'error' ? 'var(--color-red)' : 'var(--color-orange)'
+      badge(issue.severity === 'error' ? 'ERRO' : 'WARN', color, c)
 
-      row.createEl('strong', { text: issue.page })
-      row.createEl('span', { text: ` — ${issue.description}` })
+      const info = c.createEl('div')
+      info.createEl('strong', { text: issue.page })
+      info.createEl('span', { text: ` — ${issue.description}` })
     }
   }
 }

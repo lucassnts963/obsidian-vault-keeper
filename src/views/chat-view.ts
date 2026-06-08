@@ -1,5 +1,6 @@
 import { ItemView, WorkspaceLeaf } from 'obsidian'
 import type VaultKeeperPlugin from '../main'
+import { card, badge, center, button } from './ui'
 import { PROMPTS } from '../llm/provider'
 
 export const CHAT_VIEW_TYPE = 'vault-keeper-chat'
@@ -25,29 +26,45 @@ export class ChatView extends ItemView {
     this.contentEl.empty()
 
     if (!this.plugin.llm) {
-      this.contentEl.createEl('p', { text: 'LLM não configurado. Configure nas settings.' })
+      center('LLM não configurado', this.contentEl)
+      this.contentEl.createEl('p', { text: 'Configure o provider nas settings para usar o chat.' })
       return
     }
 
     const chatArea = this.contentEl.createEl('div')
     chatArea.style.maxHeight = '70vh'
     chatArea.style.overflowY = 'auto'
-    chatArea.style.marginBottom = '8px'
+    chatArea.style.marginBottom = '12px'
+
+    if (this.messages.length === 0) {
+      center('Pergunte algo sobre seu vault...', chatArea)
+    }
 
     for (const msg of this.messages) {
       this.renderMessage(chatArea, msg)
     }
 
     const inputRow = this.contentEl.createEl('div')
+    inputRow.style.display = 'flex'
+    inputRow.style.gap = '8px'
+
     const input = inputRow.createEl('input') as HTMLInputElement
     input.placeholder = 'Pergunte algo sobre seu vault...'
     input.style.flex = '1'
+    input.style.padding = '8px'
+    input.style.border = '1px solid var(--background-modifier-border)'
+    input.style.borderRadius = '6px'
+    input.style.background = 'var(--background-primary)'
+    input.style.color = 'var(--text-normal)'
 
-    const sendBtn = inputRow.createEl('button', { text: 'Enviar' })
-    sendBtn.addEventListener('click', () => this.send(input))
+    const send = button('Enviar', true, () => this.send(input), inputRow)
+
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') this.send(input)
     })
+
+    // Scroll to bottom
+    setTimeout(() => { chatArea.scrollTop = chatArea.scrollHeight }, 50)
   }
 
   private async send(input: HTMLInputElement) {
@@ -72,24 +89,28 @@ export class ChatView extends ItemView {
   }
 
   private renderMessage(container: HTMLElement, msg: { role: string; content: string }) {
-    const bubble = container.createEl('div')
+    const c = card(container)
+    c.style.marginBottom = '8px'
 
     if (msg.role === 'user') {
-      bubble.createEl('strong', { text: 'Você:' })
-      bubble.createEl('p', { text: msg.content })
+      badge('Você', 'var(--text-accent)', c)
     } else {
-      bubble.createEl('strong', { text: 'LLM:' })
-      const p = bubble.createEl('div')
-      const parts = msg.content.split(/(\[\[[^\]]+\]\])/g)
-      for (const part of parts) {
-        if (part.startsWith('[[') && part.endsWith(']]')) {
-          const link = p.createEl('a')
-          link.textContent = part.slice(2, -2)
-          link.style.color = 'var(--link-color)'
-          link.style.cursor = 'pointer'
-        } else {
-          p.createEl('span', { text: part })
-        }
+      badge('LLM', 'var(--color-green)', c)
+    }
+
+    const body = c.createEl('div')
+    body.style.marginTop = '6px'
+
+    const parts = msg.content.split(/(\[\[[^\]]+\]\])/g)
+    for (const part of parts) {
+      if (part.startsWith('[[') && part.endsWith(']]')) {
+        const link = body.createEl('a')
+        link.textContent = part.slice(2, -2)
+        link.style.color = 'var(--link-color)'
+        link.style.cursor = 'pointer'
+        link.style.textDecoration = 'underline'
+      } else {
+        body.createEl('span', { text: part })
       }
     }
   }
