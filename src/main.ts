@@ -195,7 +195,13 @@ export default class VaultKeeperPlugin extends Plugin {
         notice.setMessage(`🔄 ${phase}`)
       })
       notice.hide()
-      new Notice(['✅ Push concluído', ...msgs.map((m: string) => `   ${m}`)].join('\n'), 8000)
+
+      const conflicts = msgs.filter((m: string) => m.includes('conflito')).length
+      const pushed = msgs.filter((m: string) => m.includes('push: ')).length
+      const summary = [`✅ Push: ${pushed} enviados`]
+      if (conflicts > 0) summary.push(`⚠️ ${conflicts} conflitos (backup salvo como .conflict)`)
+      summary.push(...msgs.map((m: string) => `   ${m}`))
+      new Notice(summary.join('\n'), 8000)
       this.refreshStatusBar()
     } catch (err: any) {
       notice.hide()
@@ -216,9 +222,14 @@ export default class VaultKeeperPlugin extends Plugin {
         notice.setMessage(`🔄 ${phase}`)
       })
       notice.hide()
-      const downloaded = msgs.filter((m: string) => !m.startsWith('pull:') && !m.startsWith('ERRO'))
-      if (downloaded.length > 0) {
-        new Notice(['📥 Pull concluído', ...msgs.map((m: string) => `   ${m}`)].join('\n'), 8000)
+
+      const downloaded = msgs.filter((m: string) => m.includes('atualizados')).length > 0
+      const backups = msgs.filter((m: string) => m.includes('backup')).length
+      if (downloaded) {
+        const summary = ['📥 Pull concluído']
+        if (backups > 0) summary.push(`⚠️ ${backups} backups salvos (.backup)`)
+        summary.push(...msgs.map((m: string) => `   ${m}`))
+        new Notice(summary.join('\n'), 8000)
       } else {
         new Notice('📥 Pull: já atualizado', 3000)
       }

@@ -263,6 +263,21 @@ export class GitHubSync {
     } catch { return { remoteAhead: false, branch: 'main' } }
   }
 
+  async detectConflicts(changedFiles: string[]): Promise<{ path: string; localSHA: string; remoteSHA: string }[]> {
+    const conflicts: { path: string; localSHA: string; remoteSHA: string }[] = []
+    for (const path of changedFiles) {
+      const cached = this.state.files[path]
+      if (!cached) continue
+      try {
+        const remote = await this.apiGet(`/contents/${path}?ref=main`)
+        if (remote.sha !== cached.sha) {
+          conflicts.push({ path, localSHA: cached.sha, remoteSHA: remote.sha })
+        }
+      } catch {}
+    }
+    return conflicts
+  }
+
   async pushFile(path: string): Promise<string> {
     await this.loadState()
     const buf = await this.vault.adapter.readBinary(path)
@@ -303,7 +318,26 @@ export class GitHubSync {
     }
     if (skipped.length > 0) log(`pulado ${skipped.length} arquivos > 1MB`)
     if (changed.length === 0 && deleted.length === 0) { log('Nada alterado'); return commits }
+
+    const changedPaths = changed.map(c => c.path)
+    const conflicts = await this.detectConflicts(changedPaths)
+    const conflictSet = new Set(conflicts.map(c => c.path))
+
+    if (conflicts.length > 0) {
+      log(`⚠️ ${conflicts.length} conflitos detectados`)
+      // Save backup of conflicted files
+      for (const c of conflicts) {
+        try {
+          const content = await this.vault.adapter.read(c.path)
+          await this.vault.adapter.write(`${c.path}.conflict.md`, content)
+          log(`backup: ${c.path} → ${c.path}.conflict.md`)
+        } catch (err: any) { log(`ERRO backup ${c.path}: ${err.message?.slice(0, 80)}`) }
+      }
+    }
+
     for (const { path, hash } of changed) {
+      if (conflictSet.has(path)) continue
+
       const file = this.vault.adapter as DataAdapter & { readBinary(path: string): Promise<ArrayBuffer> }
       const content = await file.readBinary(path)
       const b64 = arrayBufferToBase64(content)
@@ -349,12 +383,25 @@ export class GitHubSync {
     log('pull: baixando tree...')
     const tree = await this.apiGet(`/git/trees/${remoteSHA}?recursive=1`)
     const files = (tree.tree || []).filter((f: any) => f.type === 'blob' && f.path.endsWith('.md'))
-    let downloaded = 0; let skipped = 0
+    let downloaded = 0; let skipped = 0; let backups = 0
     for (const f of files) {
       const cached = this.state.files[f.path]
       if (cached && cached.sha === f.sha) continue
       if (f.size && f.size > MAX_FILE_SIZE) { log(`pulado ${f.path} (>1MB)`); skipped++; continue }
       try {
+        // Backup local version if it was modified since last sync
+        if (cached) {
+          try {
+            const localBuf = await this.vault.adapter.readBinary(f.path)
+            const localHash = await sha256(localBuf)
+            if (localHash !== cached.sha) {
+              const localContent = new TextDecoder('utf-8').decode(localBuf)
+              await this.vault.adapter.write(`${f.path}.backup.md`, localContent)
+              backups++
+            }
+          } catch {}
+        }
+
         const file = await this.apiGet(`/contents/${f.path}?ref=main`)
         if (!file.content) continue
         const decoded = base64ToUint8Array(file.content.replace(/\n/g, ''))
@@ -368,6 +415,7 @@ export class GitHubSync {
     this.state.lastRemoteSHA = remoteSHA
     await this.saveState()
     log(`pull: ${downloaded} arquivos atualizados`)
+    if (backups > 0) log(`pull: ${backups} backups salvos`)
     if (skipped > 0) log(`pull: ${skipped} arquivos pulados (>1MB)`)
     return commits
   }
