@@ -2,6 +2,7 @@ import { Notice, Plugin, WorkspaceLeaf, addIcon, TFile } from 'obsidian'
 import { VaultKeeperSettings, DEFAULT_SETTINGS } from './settings'
 import { VaultKeeperSettingTab } from './settings-tab'
 import { GitHubSync } from './github/sync'
+import { TermuxSync } from './termux/sync'
 import { InboxView, INBOX_VIEW_TYPE } from './views/inbox-view'
 import { ChatView, CHAT_VIEW_TYPE } from './views/chat-view'
 import { LintView, LINT_VIEW_TYPE } from './views/lint-view'
@@ -21,6 +22,7 @@ const PULL_ICON =
 export default class VaultKeeperPlugin extends Plugin {
   declare settings: VaultKeeperSettings
   github!: GitHubSync | null
+  termux!: TermuxSync
   llm!: LLMProvider | null
   wiki!: WikiOps
   logger!: Logger
@@ -61,6 +63,7 @@ export default class VaultKeeperPlugin extends Plugin {
       this.github = null
     }
 
+    this.termux = new TermuxSync(this.app.vault)
     this.llm = createProvider(this.settings.llm)
 
     this.wiki = new WikiOps(this.app.vault, this.settings)
@@ -111,6 +114,21 @@ export default class VaultKeeperPlugin extends Plugin {
       callback: () => this.showStatus(),
     })
     this.addCommand({
+      id: 'termux-sync',
+      name: 'Termux: sync (pull+push)',
+      callback: () => this.termux.sync(),
+    })
+    this.addCommand({
+      id: 'termux-push',
+      name: 'Termux: push',
+      callback: () => this.termux.push(),
+    })
+    this.addCommand({
+      id: 'termux-pull',
+      name: 'Termux: pull',
+      callback: () => this.termux.pull(),
+    })
+    this.addCommand({
       id: 'ingest-current',
       name: 'Ingest: arquivo atual',
       callback: () => this.wiki.ingestFile(this.app.workspace.getActiveFile(), this.llm),
@@ -127,8 +145,7 @@ export default class VaultKeeperPlugin extends Plugin {
 
     this.statusBarEl = this.addStatusBarItem()
     this.statusBarEl.addClass('vault-keeper-status')
-    this.statusBarEl.setText(this.github ? 'github: ...' : '')
-    if (this.github) this.refreshStatusBar()
+    this.refreshStatusBar()
 
     this.setupAutoSync()
 
@@ -278,58 +295,41 @@ export default class VaultKeeperPlugin extends Plugin {
   }
 
   async showStatus(): Promise<void> {
-    if (!this.github) {
-      new Notice('⚠️ GitHub sync não configurado')
-      return
-    }
-
     try {
-      const status = await this.github.status()
-      const parts = [
-        `📝 branch: ${status.branch}`,
-        `   mudanças locais: ${status.localChanges.length}`,
-        `   remoto à frente: ${status.remoteAhead ? 'sim' : 'não'}`,
-      ]
-      if (status.localChanges.length > 0) {
-        parts.push('   arquivos:')
-        for (const f of status.localChanges.slice(0, 10)) {
-          parts.push(`     - ${f}`)
+      const status = await this.termux.status()
+      if (this.github) {
+        try {
+          const ghStatus = await this.github.status()
+          const parts = [status]
+          if (ghStatus.localChanges.length > 0) {
+            parts.push(`   📝 ${ghStatus.localChanges.length} alterados`)
+            for (const f of ghStatus.localChanges.slice(0, 5)) {
+              parts.push(`     - ${f}`)
+            }
+          } else {
+            parts.push('   ✅ Nada alterado')
+          }
+          new Notice(parts.join('\n'), 6000)
+        } catch {
+          new Notice(status, 4000)
         }
-        if (status.localChanges.length > 10) {
-          parts.push(`     ... +${status.localChanges.length - 10} mais`)
-        }
+      } else {
+        new Notice(status, 4000)
       }
-      new Notice(parts.join('\n'), 8000)
-    } catch (err: any) {
-      new Notice(`⚠️ Status: ${err.message?.slice(0, 200)}`, 6000)
+    } catch {
+      new Notice('git: ???', 4000)
     }
   }
 
   async refreshStatusBar(): Promise<void> {
-    if (!this.statusBarEl || !this.github) return
-
-    const now = Date.now()
-    if (now - this.lastStatusCheck < 5000 && this.statusCache) {
-      this.renderStatusBar(this.statusCache)
-      return
-    }
+    if (!this.statusBarEl) return
 
     try {
-      this.statusCache = await this.github.quickStatus()
-      this.lastStatusCheck = now
-      this.renderStatusBar(this.statusCache)
+      const status = await this.termux.status()
+      this.statusBarEl.setText(status)
     } catch {
-      this.statusBarEl.setText('github: ⚠️')
+      this.statusBarEl.setText('')
     }
-  }
-
-  private renderStatusBar(qs: { remoteAhead: boolean; branch: string }): void {
-    if (!this.statusBarEl) return
-    this.statusBarEl.setText(`github: ${qs.remoteAhead ? '⬇' : '☁'} ${qs.branch}`)
-    this.statusBarEl.setAttr(
-      'aria-label',
-      `remoto ${qs.remoteAhead ? 'tem novidades' : 'sincronizado'}`,
-    )
   }
 
   private checkSyncReady(): boolean {
