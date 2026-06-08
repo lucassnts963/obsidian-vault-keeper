@@ -27,6 +27,7 @@ export default class VaultKeeperPlugin extends Plugin {
   private autoSyncInterval: ReturnType<typeof setInterval> | null = null
 
   async onload() {
+    try {
     await this.loadSettings()
 
     addIcon('vault-keeper-sync', SYNC_ICON)
@@ -97,6 +98,12 @@ export default class VaultKeeperPlugin extends Plugin {
 
     // ── Auto-sync ───────────────────────────────────────
     this.setupAutoSync()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      const stack = err instanceof Error ? err.stack : ''
+      new Notice(`Vault Keeper ERRO: ${msg}\n${(stack || '').slice(0, 200)}`, 0)
+      throw err
+    }
   }
 
   /** Ativa uma view (abre se não existir) */

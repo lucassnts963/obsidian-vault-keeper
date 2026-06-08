@@ -13,10 +13,11 @@ import type { PromiseFsClient } from 'isomorphic-git'
 export function createVaultFs(vault: Vault, vaultRoot?: string): PromiseFsClient {
   const adapter: DataAdapter = vault.adapter
   const basePath = vaultRoot ?? (adapter as any).basePath ?? ''
-  const baseLen = basePath ? basePath.replace(/\/$/, '').length + 1 : 0
+  const baseLen = typeof basePath === 'string' && basePath ? basePath.replace(/\/$/, '').length + 1 : 0
 
   /** Normaliza caminho absoluto → relativo */
   function rel(path: string): string {
+    if (path == null || typeof path !== 'string') return '/'
     if (path === '.' || path === '/') return '/'
     if (!basePath || !path.startsWith(basePath)) return path
     let r = path.slice(baseLen)

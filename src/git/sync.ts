@@ -97,7 +97,15 @@ export class GitSync {
   constructor(vault: Vault, settings: { git: GitSettings }) {
     this.vault = vault
     this.settings = settings.git
-    this.dir = (vault.adapter as any).basePath ?? '/vault'
+    // basePath pode não existir ou lançar erro no mobile
+    try {
+      this.dir = (vault.adapter as any).basePath ?? ''
+    } catch {
+      this.dir = ''
+    }
+    if (!this.dir) {
+      this.dir = '/vault'
+    }
     this.fsClient = createVaultFs(this.vault, this.dir)
   }
 
