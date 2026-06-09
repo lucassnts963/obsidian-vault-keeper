@@ -107,9 +107,19 @@ export class ChatView extends ItemView {
     const b = bubble(isUser ? 'user' : 'agent', container)
 
     const rawContent = msg.content
-    const isAlreadyHtml = rawContent.includes('<h') || rawContent.includes('<strong') || rawContent.includes('<code') || rawContent.includes('<pre')
+    let displayContent = rawContent
 
-    b.body.innerHTML = isAlreadyHtml ? rawContent : renderMarkdown(rawContent)
+    // Fallback: if answer is raw JSON with content field, extract it
+    if (rawContent.trim().startsWith('{') && rawContent.includes('"content"')) {
+      try {
+        const parsed = JSON.parse(rawContent.trim())
+        if (parsed.content) displayContent = parsed.content
+      } catch {}
+    }
+
+    const isAlreadyHtml = displayContent.includes('<h') || displayContent.includes('<strong') || displayContent.includes('<code') || displayContent.includes('<pre')
+
+    b.body.innerHTML = isAlreadyHtml ? displayContent : renderMarkdown(displayContent)
 
     // Wire up wikilink clicks
     b.body.querySelectorAll('.vk-wikilink').forEach((el: any) => {

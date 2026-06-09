@@ -39,12 +39,21 @@ export class VaultAgent {
   }
 
   parseResponse(text: string): ToolCall | AnswerCall {
-    const match = text.match(/\{[\s\S]*"type"[\s\S]*\}/)
+    // Strip markdown code blocks
+    let cleaned = text.replace(/```json\s*([\s\S]*?)```/g, '$1').replace(/```\s*([\s\S]*?)```/g, '$1').trim()
+
+    // Try to find JSON anywhere in the response
+    const match = cleaned.match(/\{[\s\S]*"type"[\s\S]*\}/)
     if (!match) return { type: 'answer', content: text }
+
     try {
       const parsed = JSON.parse(match[0])
       if (parsed.type === 'tool' && parsed.tool) return parsed as ToolCall
+      if (parsed.type === 'answer') return parsed as AnswerCall
+      // If JSON exists but no recognized type, treat content field as answer
+      if (parsed.content) return { type: 'answer', content: parsed.content }
     } catch {}
+
     return { type: 'answer', content: text }
   }
 
