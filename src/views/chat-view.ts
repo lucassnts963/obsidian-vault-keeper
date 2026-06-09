@@ -1,12 +1,13 @@
 import { ItemView, WorkspaceLeaf } from 'obsidian'
 import type VaultKeeperPlugin from '../main'
-import { card, badge, center, button } from './ui'
+import { bubble, center, button, collapsible, loadingDots } from './ui'
+import { renderMarkdown } from './markdown'
 
 export const CHAT_VIEW_TYPE = 'vault-keeper-chat'
 
 export class ChatView extends ItemView {
   plugin: VaultKeeperPlugin
-  private messages: Array<{ role: string; content: string }> = []
+  private messages: Array<{ role: string; content: string; toolResults?: Array<{ tool: string; args: any; result: string }> }> = []
 
   constructor(leaf: WorkspaceLeaf, plugin: VaultKeeperPlugin) {
     super(leaf)
@@ -56,13 +57,12 @@ export class ChatView extends ItemView {
     input.style.background = 'var(--background-primary)'
     input.style.color = 'var(--text-normal)'
 
-    const send = button('Enviar', true, () => this.send(input), inputRow)
+    button('Enviar', true, () => this.send(input), inputRow)
 
     input.addEventListener('keydown', (e) => {
       if (e.key === 'Enter') this.send(input)
     })
 
-    // Scroll to bottom
     setTimeout(() => { chatArea.scrollTop = chatArea.scrollHeight }, 50)
   }
 
@@ -76,39 +76,47 @@ export class ChatView extends ItemView {
     this.messages.push({ role: 'user', content: question })
     this.render()
 
+    // Loading indicator
+    const loading = loadingDots(this.contentEl.querySelector('div') || this.contentEl)
+
     const response = await this.plugin.agent.run(question, this.messages as any)
 
-    this.messages.push({ role: 'assistant', content: response })
+    loading.remove()
+
+    this.messages.push({
+      role: 'assistant',
+      content: response.answer,
+      toolResults: response.steps.map(s => ({ tool: s.tool, args: s.args, result: s.result })),
+    })
     this.render()
 
     input.disabled = false
     input.focus()
   }
 
-  private renderMessage(container: HTMLElement, msg: { role: string; content: string }) {
-    const c = card(container)
-    c.style.marginBottom = '8px'
-
-    if (msg.role === 'user') {
-      badge('Você', 'var(--text-accent)', c)
-    } else {
-      badge('LLM', 'var(--color-green)', c)
-    }
-
-    const body = c.createEl('div')
-    body.style.marginTop = '6px'
-
-    const parts = msg.content.split(/(\[\[[^\]]+\]\])/g)
-    for (const part of parts) {
-      if (part.startsWith('[[') && part.endsWith(']]')) {
-        const link = body.createEl('a')
-        link.textContent = part.slice(2, -2)
-        link.style.color = 'var(--link-color)'
-        link.style.cursor = 'pointer'
-        link.style.textDecoration = 'underline'
-      } else {
-        body.createEl('span', { text: part })
+  private renderMessage(container: HTMLElement, msg: { role: string; content: string; toolResults?: Array<{ tool: string; args: any; result: string }> }) {
+    // Agent tool calls — show before the answer bubble
+    if (msg.toolResults && msg.toolResults.length > 0) {
+      for (const tc of msg.toolResults) {
+        const argStr = Object.entries(tc.args).map(([k, v]) => `${(v as string).split('/').pop() || v}`).filter(Boolean).join(', ')
+        collapsible(`${tc.tool}(${argStr})`, tc.result, container)
       }
     }
+
+    const isUser = msg.role === 'user'
+    const b = bubble(isUser ? 'user' : 'agent', container)
+
+    const rawContent = msg.content
+    const isAlreadyHtml = rawContent.includes('<h') || rawContent.includes('<strong') || rawContent.includes('<code') || rawContent.includes('<pre')
+
+    b.body.innerHTML = isAlreadyHtml ? rawContent : renderMarkdown(rawContent)
+
+    // Wire up wikilink clicks
+    b.body.querySelectorAll('.vk-wikilink').forEach((el: any) => {
+      el.addEventListener('click', () => {
+        const path = el.getAttribute('data-path')
+        if (path) this.plugin.app.workspace.openLinkText(path, '', true)
+      })
+    })
   }
 }

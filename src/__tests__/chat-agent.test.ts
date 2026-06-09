@@ -76,8 +76,10 @@ describe('VaultAgent', () => {
     const agent = new VaultAgent(v as any, llm, { wikiPath: 'wiki', indexPath: 'wiki/index.md' })
     await agent.ensureConfig()
 
-    const answer = await agent.run('question', [])
-    expect(answer).toContain('Based on the file')
+    const response = await agent.run('question', [])
+    expect(response.answer).toContain('Based on the file')
+    expect(response.steps.length).toBe(1)
+    expect(response.steps[0].tool).toBe('read_file')
   })
 
   it('stops at max iterations and makes final call', async () => {
@@ -91,8 +93,9 @@ describe('VaultAgent', () => {
     const agent = new VaultAgent(v as any, llm, { wikiPath: 'wiki', indexPath: 'wiki/index.md' }, 3, 2)
     await agent.ensureConfig()
 
-    const answer = await agent.run('q', [])
-    expect(answer).toContain('final answer')
+    const response = await agent.run('q', [])
+    expect(response.answer).toContain('final answer')
+    expect(response.steps.length).toBe(3)
   })
 })
 

@@ -4,6 +4,8 @@ import type { LLMProvider, Message } from '../llm/provider'
 
 interface ToolCall { type: 'tool'; tool: string; args: any }
 interface AnswerCall { type: 'answer'; content: string }
+export interface AgentStep { type: 'tool'; tool: string; args: Record<string, any>; result: string }
+export interface AgentResponse { steps: AgentStep[]; answer: string }
 
 export class VaultAgent {
   private vault: any
@@ -46,7 +48,7 @@ export class VaultAgent {
     return { type: 'answer', content: text }
   }
 
-  async run(question: string, history: Message[]): Promise<string> {
+  async run(question: string, history: Message[]): Promise<AgentResponse> {
     await this.ensureConfig()
 
     const messages: Message[] = [
@@ -55,13 +57,14 @@ export class VaultAgent {
     ]
 
     const readFiles = new Set<string>()
+    const steps: AgentStep[] = []
 
     for (let iter = 0; iter < this.maxIterations; iter++) {
       const response = await this.llm.chat(messages, { temperature: 0.1 })
       const parsed = this.parseResponse(response)
 
       if (parsed.type === 'answer') {
-        return parsed.content
+        return { steps, answer: parsed.content }
       }
 
       const toolCall = parsed as ToolCall
@@ -78,6 +81,7 @@ export class VaultAgent {
       }
 
       readFiles.add(toolCall.tool + ':' + JSON.stringify(toolCall.args))
+      steps.push({ type: 'tool', tool: toolCall.tool, args: toolCall.args, result })
       messages.push({
         role: 'user',
         content: `Tool result for ${toolCall.tool}(${JSON.stringify(toolCall.args)}):\n${result.slice(0, this.maxFileChars)}`,
@@ -90,6 +94,6 @@ export class VaultAgent {
       { role: 'user', content: 'You reached the maximum number of tool calls. Please answer the original question now based on the context gathered. Original question: ' + question },
     ]
     const finalResp = await this.llm.chat(finalMessages, { temperature: 0.3 })
-    return finalResp
+    return { steps, answer: finalResp }
   }
 }
