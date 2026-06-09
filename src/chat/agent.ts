@@ -86,7 +86,7 @@ export class VaultAgent {
 
       const toolCall = parsed as ToolCall
       if (readFiles.has(toolCall.tool + ':' + JSON.stringify(toolCall.args))) {
-        messages.push({ role: 'user', content: `Already read. Try another path or answer.` })
+        messages.push({ role: 'user', content: `Já lido. Tente outro caminho ou responda. / Already read. Try another path or answer.` })
         continue
       }
 
@@ -107,7 +107,7 @@ export class VaultAgent {
 
     const finalMessages: Message[] = [
       { role: 'system', content: this.systemPrompt },
-      { role: 'user', content: 'You reached the maximum number of tool calls. Please answer the original question now based on the context gathered. Original question: ' + question },
+      { role: 'user', content: 'Você atingiu o máximo de chamadas. Responda a pergunta original com o contexto coletado. / You reached the maximum number of tool calls. Answer based on context gathered. Original question: ' + question },
     ]
     const finalResp = await this.llm.chat(finalMessages, { temperature: 0.3 })
     return { steps, answer: finalResp }

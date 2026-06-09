@@ -2,30 +2,36 @@ import type { VaultKeeperSettings } from '../settings'
 
 export type AgentCLI = 'claude' | 'opencode' | 'gemini' | 'custom'
 
-export const VAULT_METHODOLOGY_INSTRUCTIONS = `## Estrutura do Vault
-- inbox/        → notas brutas a revisar (status: inbox)
-- raw/          → aprovadas aguardando ingest (status: approved)
-- wiki/         → páginas compiladas (status: ingested)
-- _slots/       → estado de sessão (focus.md, lint-report.md…)
-- .vault-keeper/bm25-index.json → índice BM25 leve
+export const VAULT_METHODOLOGY_INSTRUCTIONS = `## Idioma / Language
+Responda sempre no mesmo idioma que o usuário usar.
+Always respond in the same language the user writes in.
 
-## Fluxos da Metodologia Karpathy
+## Estrutura do Vault / Vault Structure
+- inbox/        → notas brutas a revisar / raw notes to review (status: inbox)
+- raw/          → aprovadas aguardando ingest / approved, awaiting ingest (status: approved)
+- wiki/         → páginas compiladas / compiled knowledge pages (status: ingested)
+- _slots/       → estado de sessão / session state (focus.md, lint-report.md…)
+- .vault-keeper/bm25-index.json → índice BM25 leve / lightweight full-text index
+
+## Fluxos / Karpathy Methodology Flows
 
 ### Ingest
-Leia raw/{arquivo}. Produza wiki/{slug}.md com frontmatter YAML:
+Leia / Read raw/{arquivo/file}. Produza / Produce wiki/{slug}.md com / with YAML frontmatter:
   title, category, tags, summary, key_entities, date, source
-Adicione linha na tabela wiki/index.md. Marque source com status: ingested.
+Adicione linha em / Add row to wiki/index.md. Marque a fonte com status: ingested.
 
-### Lint
-Escaneie wiki/ para: frontmatter ausente, páginas órfãs, entradas faltando no index.
-Escreva relatório em _slots/lint-report.md.
+### Lint / Auditoria
+Escaneie / Scan wiki/ para / for: frontmatter ausente / missing frontmatter,
+páginas órfãs / orphaned pages, entradas faltando no index / missing index entries.
+Escreva relatório / Write report em / to _slots/lint-report.md.
 
-### Query
-Use .vault-keeper/bm25-index.json para encontrar páginas relevantes.
-Responda citando [[wiki/nome-da-pagina]]. Nunca invente fatos.
+### Query / Consulta
+Use .vault-keeper/bm25-index.json para encontrar / to find relevant pages.
+Responda citando / Answer citing [[wiki/nome-da-pagina/page-name]]. Nunca invente fatos / Never invent facts.
 
-### Focus
-Escreva descrição da tarefa atual em _slots/focus.md.`
+### Focus / Foco
+Escreva / Write the current task description em / to _slots/focus.md.
+Leia ao iniciar sessão / Read at session start para contexto / for context.`
 
 export class CLIBridge {
   constructor(private settings: VaultKeeperSettings) {}
@@ -64,15 +70,18 @@ export class CLIBridge {
     const cli = this.resolvedBinary()
     if (!cli) return ''
 
+    const pref = this.settings.cli?.preferred
+    const instrFile = pref === 'gemini' ? 'GEMINI.md' : pref === 'opencode' ? 'AGENTS.md' : 'CLAUDE.md'
+
     switch (task) {
       case 'ingest':
-        return `${cli} -p "Ingira o arquivo ${args.file || 'raw/'} seguindo as instruções em CLAUDE.md"`
+        return `${cli} -p "Ingira (ingest) o arquivo ${args.file || 'raw/'} seguindo as instruções em ${instrFile}"`
       case 'lint':
-        return `${cli} -p "Execute o fluxo de lint do vault seguindo as instruções em CLAUDE.md"`
+        return `${cli} -p "Execute o fluxo de lint (auditoria) do vault seguindo as instruções em ${instrFile}"`
       case 'query':
-        return `${cli} -p "${args.question || 'Responda a consulta sobre o vault seguindo CLAUDE.md'}"`
+        return `${cli} -p "${args.question || 'Responda a consulta sobre o vault'} (veja ${instrFile})"`
       case 'focus':
-        return `${cli} -p "Atualize _slots/focus.md com: ${args.description || 'tarefa atual'}"`
+        return `${cli} -p "Atualize _slots/focus.md com: ${args.description || 'tarefa atual'} (veja ${instrFile})"`
     }
   }
 

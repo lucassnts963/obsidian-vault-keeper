@@ -190,16 +190,30 @@ export class ChatView extends ItemView {
 
   private parseTask(text: string): { type: 'ingest' | 'lint' | 'query' | 'focus'; args: Record<string, string> } {
     const lower = text.toLowerCase()
-    if (lower.startsWith('ingest') || lower.includes('ingir') || lower.includes('processar')) {
-      const fileMatch = text.match(/raw\/[\w\-./]+\.md/)
+
+    // Ingest — PT: ingira, ingerir, processar / EN: ingest, process file
+    if (/\b(ingest|ingir|ingira|ingerir|processar)\b/.test(lower)) {
+      const fileMatch = text.match(/raw\/[\w\-./ ]+\.md/)
       return { type: 'ingest', args: fileMatch ? { file: fileMatch[0] } : {} }
     }
-    if (lower.includes('lint') || lower.includes('audit') || lower.includes('verificar')) {
+
+    // Lint/audit — PT: lint, auditoria, auditar, verificar vault / EN: lint, audit
+    if (/\b(lint|auditoria|auditar|verificar vault|audit)\b/.test(lower)) {
       return { type: 'lint', args: {} }
     }
-    if (lower.startsWith('focus') || lower.includes('foco') || lower.includes('tarefa')) {
+
+    // Focus WRITE — only when explicitly setting/updating focus, not when reading/asking about it.
+    // PT: "definir foco", "atualizar foco", "meu foco é X" / EN: "set focus", "focus on", "focus: X"
+    if (
+      /\b(definir foco|atualizar foco|setar foco|set focus|update focus|focus on)\b/.test(lower) ||
+      /\bmeu foco (é|sera|será|vai ser)\b/.test(lower) ||
+      /^foco:\s*/i.test(text) ||
+      /^focus:\s*/i.test(text)
+    ) {
       return { type: 'focus', args: { description: text } }
     }
+
+    // Default: query — includes "qual é meu foco?", topic questions, etc.
     return { type: 'query', args: { question: text } }
   }
 
