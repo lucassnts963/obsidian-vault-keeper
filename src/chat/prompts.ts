@@ -2,6 +2,9 @@ const TOOL_FORMAT = `## Response Format (managed by the plugin — do not modify
 
 You MUST respond using ONLY ONE of these JSON formats. No text outside the JSON.
 
+To search the vault (use FIRST before reading files):
+{"type":"tool","tool":"search_vault","args":{"query":"your search terms"}}
+
 To use a tool:
 {"type":"tool","tool":"read_file","args":{"path":"wiki/page.md"}}
 {"type":"tool","tool":"list_dir","args":{"path":"wiki"}}
@@ -18,6 +21,8 @@ To answer the user:
 Rules:
 - Maximum 5 tool calls per question
 - Never re-read the same file
+- START with search_vault to find relevant pages, then read only the best matches
+- Prefer search_vault over read_index+read_file — it's faster and uses fewer tokens
 - Always cite sources with [[links]]
 - Respond in the same language as the user`
 

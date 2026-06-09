@@ -1,6 +1,7 @@
 import { buildSystemPrompt } from './prompts'
 import { executeTool } from './tools'
 import type { LLMProvider, Message } from '../llm/provider'
+import type { SearchEngine } from '../search/index'
 
 interface ToolCall { type: 'tool'; tool: string; args: any }
 interface AnswerCall { type: 'answer'; content: string }
@@ -11,9 +12,11 @@ export class VaultAgent {
   private vault: any
   private llm: LLMProvider
   private indexPath: string
+  private wikiPath: string
   private maxIterations: number
   private maxFileChars: number
   private wiki: any
+  private searchEngine?: SearchEngine
   systemPrompt = ''
   private configLoaded = false
 
@@ -22,13 +25,16 @@ export class VaultAgent {
     settings: { wikiPath: string; indexPath: string },
     wiki?: any,
     maxIterations = 5, maxFileChars = 3000,
+    searchEngine?: SearchEngine,
   ) {
     this.vault = vault
     this.llm = llm
     this.indexPath = settings.indexPath
+    this.wikiPath = settings.wikiPath
     this.wiki = wiki
     this.maxIterations = maxIterations
     this.maxFileChars = maxFileChars
+    this.searchEngine = searchEngine
   }
 
   async ensureConfig(): Promise<void> {
@@ -87,7 +93,7 @@ export class VaultAgent {
 
       let result: string
       try {
-        result = await executeTool(this.vault, toolCall.tool, toolCall.args, this.indexPath, this.wiki, this.llm, this.maxFileChars)
+        result = await executeTool(this.vault, toolCall.tool, toolCall.args, this.indexPath, this.wiki, this.llm, this.maxFileChars, this.searchEngine)
       } catch (err: any) {
         result = `Tool error: ${err.message}`
       }
