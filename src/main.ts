@@ -1,4 +1,4 @@
-import { Notice, Plugin, WorkspaceLeaf, addIcon, TFile } from 'obsidian'
+import { Notice, Plugin, WorkspaceLeaf, addIcon } from 'obsidian'
 import { VaultKeeperSettings, DEFAULT_SETTINGS } from './settings'
 import { VaultKeeperSettingTab } from './settings-tab'
 import { GitHubSync } from './github/sync'
@@ -6,10 +6,15 @@ import { TermuxSync } from './termux/sync'
 import { InboxView, INBOX_VIEW_TYPE } from './views/inbox-view'
 import { ChatView, CHAT_VIEW_TYPE } from './views/chat-view'
 import { LintView, LINT_VIEW_TYPE } from './views/lint-view'
+import { OnboardingView, ONBOARDING_VIEW_TYPE } from './views/onboarding-view'
 import { LLMProvider, createProvider } from './llm/provider'
 import { WikiOps } from './wiki/ops'
 import { Logger } from './wiki/log'
 import { VaultAgent } from './chat/agent'
+import { VaultInstaller } from './scaffold/installer'
+import { CLIBridge } from './agents/cli-bridge'
+import { VaultIntegrityMonitor } from './agents/monitor'
+import { IndexPersistence } from './search/index-persistence'
 
 const SYNC_ICON =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>'
@@ -28,6 +33,7 @@ export default class VaultKeeperPlugin extends Plugin {
   wiki!: WikiOps
   logger!: Logger
   agent!: VaultAgent
+  cliBridge: CLIBridge | null = null
 
   private statusBarEl: HTMLElement | null = null
   private autoSyncInterval: ReturnType<typeof setInterval> | null = null
@@ -82,6 +88,7 @@ export default class VaultKeeperPlugin extends Plugin {
     this.registerView(INBOX_VIEW_TYPE, (leaf) => new InboxView(leaf, this))
     this.registerView(CHAT_VIEW_TYPE, (leaf) => new ChatView(leaf, this))
     this.registerView(LINT_VIEW_TYPE, (leaf) => new LintView(leaf, this))
+    this.registerView(ONBOARDING_VIEW_TYPE, (leaf) => new OnboardingView(leaf, this))
 
     this.addCommand({
       id: 'open-inbox',
@@ -177,6 +184,7 @@ export default class VaultKeeperPlugin extends Plugin {
     this.addRibbonIcon('inbox', 'Vault Keeper: Inbox', () => this.activateView(INBOX_VIEW_TYPE))
     this.addRibbonIcon('message-square', 'Vault Keeper: Chat', () => this.activateView(CHAT_VIEW_TYPE))
     this.addRibbonIcon('search', 'Vault Keeper: Lint', () => this.activateView(LINT_VIEW_TYPE))
+    this.addRibbonIcon('wand', 'Vault Keeper: Configuração', () => this.activateView(ONBOARDING_VIEW_TYPE))
 
     if (this.github) {
       this.addRibbonIcon('vault-keeper-push', 'Vault Keeper: Push', () => this.doPush())
@@ -192,6 +200,54 @@ export default class VaultKeeperPlugin extends Plugin {
 
     if (this.github) {
       setTimeout(() => this.autoPullOnStart(), 2000)
+    }
+
+    this.initCLIBridge()
+    this.initVaultMonitor()
+    setTimeout(() => this.checkFirstRun(), 1500)
+  }
+
+  private initCLIBridge(): void {
+    const cli = this.settings.cli
+    if (cli?.preferred && cli.preferred !== 'none') {
+      this.cliBridge = new CLIBridge(this.settings)
+    } else if (cli?.autoDetect !== false) {
+      CLIBridge.detect().then(detected => {
+        if (detected) {
+          this.settings.cli = { ...this.settings.cli, preferred: detected }
+          this.cliBridge = new CLIBridge(this.settings)
+        }
+      }).catch(() => {})
+    }
+  }
+
+  private initVaultMonitor(): void {
+    const adapter = {
+      read: (p: string) => this.app.vault.adapter.read(p),
+      write: (p: string, c: string) => this.app.vault.adapter.write(p, c),
+      exists: async (p: string) => !!(await this.app.vault.adapter.exists(p)),
+      mkdir: (p: string) => this.app.vault.adapter.mkdir(p),
+    }
+    const persistence = new IndexPersistence(adapter)
+    const monitor = new VaultIntegrityMonitor(
+      this.app.vault as any,
+      this.settings.wikiPath,
+      persistence,
+    )
+    monitor.register(this)
+  }
+
+  private async checkFirstRun(): Promise<void> {
+    const adapter = {
+      read: (p: string) => this.app.vault.adapter.read(p),
+      write: (p: string, c: string) => this.app.vault.adapter.write(p, c),
+      exists: async (p: string) => !!(await this.app.vault.adapter.exists(p)),
+      mkdir: (p: string) => this.app.vault.adapter.mkdir(p),
+    }
+    const installer = new VaultInstaller(adapter)
+    const initialized = await installer.isInitialized()
+    if (!initialized) {
+      this.activateView(ONBOARDING_VIEW_TYPE)
     }
   }
 

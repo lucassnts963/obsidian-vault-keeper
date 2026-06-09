@@ -16,11 +16,22 @@ export interface GitSettings {
   authorName: string
   authorEmail: string
   autoSyncMinutes: number  // 0 = desligado
+  syncOnOpen: boolean
+  syncOnClose: boolean
+  conflictStrategy: 'ask' | 'keep-local' | 'keep-remote'
+}
+
+/** External CLI settings (Claude Code, OpenCode, Gemini CLI, etc.) */
+export interface CLISettings {
+  preferred: 'claude' | 'opencode' | 'gemini' | 'custom' | 'none'
+  customBinaryPath: string
+  autoDetect: boolean
 }
 
 export interface VaultKeeperSettings {
   llm: LLMSettings
   git: GitSettings
+  cli: CLISettings
   agent: {
     maxIterations: number
     maxFileChars: number
@@ -53,6 +64,14 @@ export const DEFAULT_SETTINGS: VaultKeeperSettings = {
     authorName: '',
     authorEmail: '',
     autoSyncMinutes: 0,
+    syncOnOpen: false,
+    syncOnClose: false,
+    conflictStrategy: 'ask',
+  },
+  cli: {
+    preferred: 'none',
+    customBinaryPath: '',
+    autoDetect: true,
   },
   agent: {
     maxIterations: 5,
