@@ -33,13 +33,15 @@ describe('VaultAgent', () => {
     VaultAgent = m.VaultAgent
   })
 
-  it('loads AGENTS.md from vault root', async () => {
+  it('falls back to DEFAULT_AGENT_PROMPT when AGENTS.md has no ## Vault Agent section', async () => {
     const v = mockVault()
-    v.files['AGENTS.md'] = '# Custom Agent\nYou are a helpful assistant.'
+    v.files['AGENTS.md'] = '# Dev Docs\n\nPlugin development content only — no vault agent section.'
     const llm = mockLLM(['{"type":"answer","content":"hello"}'])
     const agent = new VaultAgent(v as any, llm, { wikiPath: 'wiki', indexPath: 'wiki/index.md' })
     await agent.ensureConfig()
-    expect(agent.systemPrompt).toContain('Custom Agent')
+    // Full dev-docs AGENTS.md without ## Vault Agent → default prompt used (not dev docs)
+    expect(agent.systemPrompt).toContain('knowledge vault')
+    expect(agent.systemPrompt).not.toContain('Plugin development content')
   })
 
   it('extracts ## Vault Agent section when present in AGENTS.md', async () => {
