@@ -3,6 +3,30 @@ import type VaultKeeperPlugin from '../main'
 import { bubble, center, button, collapsible, loadingDots } from './ui'
 import { renderMarkdown } from './markdown'
 
+export function extractAnswerContent(text: string): string | null {
+  // Try find JSON with answer content anywhere
+  const patterns = [
+    /\{[\s\S]*?"type"\s*:\s*"answer"[\s\S]*?"content"\s*:\s*"([\s\S]*?)(?:"\s*\}|"\s*,\s*")/,
+    /"content"\s*:\s*"((?:[^"\\]|\\.)*)"/,
+  ]
+  for (const p of patterns) {
+    const m = text.match(p)
+    if (m && m[1]) {
+      try {
+        // Try full JSON parse first
+        const fullMatch = text.match(/\{[\s\S]*"type"[\s\S]*"answer"[\s\S]*\}/)
+        if (fullMatch) {
+          const parsed = JSON.parse(fullMatch[0])
+          if (parsed.content) return parsed.content
+        }
+      } catch {}
+      // Fallback: regex extraction with unescaping
+      return m[1].replace(/\\n/g, '\n').replace(/\\"/g, '"').replace(/\\\\/g, '\\')
+    }
+  }
+  return null
+}
+
 export const CHAT_VIEW_TYPE = 'vault-keeper-chat'
 
 export class ChatView extends ItemView {
@@ -109,13 +133,9 @@ export class ChatView extends ItemView {
     const rawContent = msg.content
     let displayContent = rawContent
 
-    // Fallback: if answer is raw JSON with content field, extract it
-    if (rawContent.trim().startsWith('{') && rawContent.includes('"content"')) {
-      try {
-        const parsed = JSON.parse(rawContent.trim())
-        if (parsed.content) displayContent = parsed.content
-      } catch {}
-    }
+    // Fallback: try extract JSON content from anywhere
+    const extracted = extractAnswerContent(rawContent)
+    if (extracted) displayContent = extracted
 
     const isAlreadyHtml = displayContent.includes('<h') || displayContent.includes('<strong') || displayContent.includes('<code') || displayContent.includes('<pre')
 

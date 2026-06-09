@@ -13,17 +13,20 @@ export class VaultAgent {
   private indexPath: string
   private maxIterations: number
   private maxFileChars: number
+  private wiki: any
   systemPrompt = ''
   private configLoaded = false
 
   constructor(
     vault: any, llm: LLMProvider,
     settings: { wikiPath: string; indexPath: string },
+    wiki?: any,
     maxIterations = 5, maxFileChars = 3000,
   ) {
     this.vault = vault
     this.llm = llm
     this.indexPath = settings.indexPath
+    this.wiki = wiki
     this.maxIterations = maxIterations
     this.maxFileChars = maxFileChars
   }
@@ -84,7 +87,7 @@ export class VaultAgent {
 
       let result: string
       try {
-        result = await executeTool(this.vault, toolCall.tool, toolCall.args, this.indexPath)
+        result = await executeTool(this.vault, toolCall.tool, toolCall.args, this.indexPath, this.wiki, this.llm)
       } catch (err: any) {
         result = `Tool error: ${err.message}`
       }

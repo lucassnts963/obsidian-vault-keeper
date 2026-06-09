@@ -71,7 +71,7 @@ export default class VaultKeeperPlugin extends Plugin {
     this.wiki = new WikiOps(this.app.vault, this.settings)
     this.logger = new Logger(this.app.vault)
 
-    this.agent = new VaultAgent(this.app.vault, this.llm || {} as any, this.settings)
+    this.agent = new VaultAgent(this.app.vault, this.llm || {} as any, this.settings, this.wiki)
 
     this.registerView(INBOX_VIEW_TYPE, (leaf) => new InboxView(leaf, this))
     this.registerView(CHAT_VIEW_TYPE, (leaf) => new ChatView(leaf, this))
@@ -157,9 +157,20 @@ export default class VaultKeeperPlugin extends Plugin {
         new Notice(`Rejeitado: ${file.path}`)
       },
     })
+    this.addCommand({
+      id: 'write-page',
+      name: 'Criar página wiki',
+      callback: async () => {
+        const title = 'Nova Página'
+        const content = ''
+        await this.wiki.writePage(title, content, [], 'uncategorized')
+        new Notice(`Página criada: ${title}`)
+      },
+    })
 
     this.addRibbonIcon('inbox', 'Vault Keeper: Inbox', () => this.activateView(INBOX_VIEW_TYPE))
     this.addRibbonIcon('message-square', 'Vault Keeper: Chat', () => this.activateView(CHAT_VIEW_TYPE))
+    this.addRibbonIcon('search', 'Vault Keeper: Lint', () => this.activateView(LINT_VIEW_TYPE))
 
     if (this.github) {
       this.addRibbonIcon('vault-keeper-push', 'Vault Keeper: Push', () => this.doPush())

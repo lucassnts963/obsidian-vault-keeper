@@ -28,6 +28,32 @@ export class WikiOps {
     await this.vault.modify(file, updated)
   }
 
+  /** Cria página wiki diretamente */
+  async writePage(title: string, content: string, tags: string[], category: string): Promise<string> {
+    const slug = this.slugify(title)
+    const wikiPath = `${this.settings.wikiPath}/${slug}.md`
+
+    const exists = await this.vault.adapter.exists(wikiPath)
+    if (exists) throw new Error(`Página já existe: ${wikiPath}`)
+
+    const frontmatter = [
+      '---',
+      `title: "${title}"`,
+      `category: ${category}`,
+      `tags: [${tags.join(', ')}]`,
+      `date: ${new Date().toISOString().slice(0, 10)}`,
+      '---',
+    ].join('\n')
+
+    const pageContent = `${frontmatter}\n\n# ${title}\n\n${content}`
+    await this.vault.create(wikiPath, pageContent)
+
+    await this.updateIndex(title, wikiPath, category, tags)
+    await this.logOperation('write', title)
+
+    return wikiPath
+  }
+
   /** Atualiza ou adiciona campo status no frontmatter YAML */
   private setFrontmatterStatus(content: string, status: string): string {
     if (content.startsWith('---')) {

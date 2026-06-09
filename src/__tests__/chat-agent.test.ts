@@ -90,7 +90,7 @@ describe('VaultAgent', () => {
       '{"type":"tool","tool":"read_file","args":{"path":"c.md"}}',
       '{"type":"answer","content":"final answer after limit"}',
     ])
-    const agent = new VaultAgent(v as any, llm, { wikiPath: 'wiki', indexPath: 'wiki/index.md' }, 3, 2)
+    const agent = new VaultAgent(v as any, llm, { wikiPath: 'wiki', indexPath: 'wiki/index.md' }, null, 3, 2)
     await agent.ensureConfig()
 
     const response = await agent.run('q', [])

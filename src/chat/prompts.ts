@@ -6,6 +6,11 @@ To use a tool:
 {"type":"tool","tool":"read_file","args":{"path":"wiki/page.md"}}
 {"type":"tool","tool":"list_dir","args":{"path":"wiki"}}
 {"type":"tool","tool":"read_index","args":{}}
+{"type":"tool","tool":"approve_file","args":{"path":"inbox/nota.md"}}
+{"type":"tool","tool":"reject_file","args":{"path":"inbox/nota.md"}}
+{"type":"tool","tool":"ingest_file","args":{"path":"raw/fonte.md"}}
+{"type":"tool","tool":"run_lint","args":{}}
+{"type":"tool","tool":"write_page","args":{"title":"Titulo","content":"Conteudo em markdown","tags":["tag1"],"category":"categoria"}}
 
 To answer the user:
 {"type":"answer","content":"Your markdown answer with [[citations]]..."}
