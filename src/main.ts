@@ -9,6 +9,7 @@ import { LintView, LINT_VIEW_TYPE } from './views/lint-view'
 import { LLMProvider, createProvider } from './llm/provider'
 import { WikiOps } from './wiki/ops'
 import { Logger } from './wiki/log'
+import { VaultAgent } from './chat/agent'
 
 const SYNC_ICON =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>'
@@ -26,6 +27,7 @@ export default class VaultKeeperPlugin extends Plugin {
   llm!: LLMProvider | null
   wiki!: WikiOps
   logger!: Logger
+  agent!: VaultAgent
 
   private statusBarEl: HTMLElement | null = null
   private autoSyncInterval: ReturnType<typeof setInterval> | null = null
@@ -68,6 +70,8 @@ export default class VaultKeeperPlugin extends Plugin {
 
     this.wiki = new WikiOps(this.app.vault, this.settings)
     this.logger = new Logger(this.app.vault)
+
+    this.agent = new VaultAgent(this.app.vault, this.llm || {} as any, this.settings)
 
     this.registerView(INBOX_VIEW_TYPE, (leaf) => new InboxView(leaf, this))
     this.registerView(CHAT_VIEW_TYPE, (leaf) => new ChatView(leaf, this))

@@ -1,7 +1,6 @@
 import { ItemView, WorkspaceLeaf } from 'obsidian'
 import type VaultKeeperPlugin from '../main'
 import { card, badge, center, button } from './ui'
-import { PROMPTS } from '../llm/provider'
 
 export const CHAT_VIEW_TYPE = 'vault-keeper-chat'
 
@@ -69,7 +68,7 @@ export class ChatView extends ItemView {
 
   private async send(input: HTMLInputElement) {
     const question = input.value.trim()
-    if (!question || !this.plugin.llm) return
+    if (!question || !this.plugin.llm || !this.plugin.agent) return
 
     input.value = ''
     input.disabled = true
@@ -77,9 +76,7 @@ export class ChatView extends ItemView {
     this.messages.push({ role: 'user', content: question })
     this.render()
 
-    const context = await this.plugin.wiki.gatherContext(question)
-    const msgs = PROMPTS.query(question, context)
-    const response = await this.plugin.llm.chat(msgs)
+    const response = await this.plugin.agent.run(question, this.messages as any)
 
     this.messages.push({ role: 'assistant', content: response })
     this.render()
