@@ -2,6 +2,7 @@ import type { Vault, TFile } from 'obsidian'
 import type { VaultKeeperSettings } from '../settings'
 import type { LLMProvider } from '../llm/provider'
 import { PROMPTS } from '../llm/provider'
+import { WikiSearchIndex, parseWikiDoc, type WikiDoc } from '../search/index-builder'
 
 export class WikiOps {
   private vault: Vault
@@ -81,24 +82,29 @@ export class WikiOps {
       parts.push(`## Index\n${index}`)
     } catch {}
 
-    const keywords = question.toLowerCase().split(/\s+/).filter(w => w.length > 3)
-    let seedPaths: string[] = []
+    // Rank candidate pages locally with BM25 and seed from the most relevant ones,
+    // so only the highest-signal pages spend tokens on the API (Karpathy: compile
+    // locally, send the relevant slice). The index/log files are not content pages.
+    const seedPaths: string[] = []
 
     try {
       const list = await this.vault.adapter.list(this.settings.wikiPath)
       const mdFiles = list.files.filter((f: string) => f.endsWith('.md'))
 
-      let matched = 0
+      const docs: WikiDoc[] = []
       for (const f of mdFiles) {
         const path = `${this.settings.wikiPath}/${f}`
+        if (path === this.settings.indexPath || path === this.settings.logPath) continue
         try {
-          const page = await this.vault.adapter.read(path)
-          if (keywords.some(kw => page.toLowerCase().includes(kw))) {
-            seedPaths.push(path)
-            matched++
-            if (matched >= maxPages) break
-          }
+          const content = await this.vault.adapter.read(path)
+          docs.push(parseWikiDoc(path, content))
         } catch {}
+      }
+
+      const search = new WikiSearchIndex()
+      search.setDocs(docs)
+      for (const hit of search.query(question, maxPages)) {
+        seedPaths.push(hit.path)
       }
     } catch {}
 
