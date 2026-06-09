@@ -1,3 +1,6 @@
+import { IndexPersistence } from '../search/index-persistence'
+import { WikiSearchIndex } from '../search/index-builder'
+
 const MAX_CHARS = 3000
 
 export async function readFile(vault: any, path: string, maxChars = MAX_CHARS): Promise<string> {
@@ -78,6 +81,43 @@ export async function runLint(vault: any, _args: any, indexPath: string, _wiki: 
   } catch (err: any) { return `Lint error: ${err.message}` }
 }
 
+export async function bm25Search(
+  vault: any,
+  args: { query: string; topK?: number },
+): Promise<string> {
+  try {
+    const persist = new IndexPersistence(vault.adapter)
+    const entries = await persist.load()
+
+    if (entries.length === 0) {
+      return 'Index is empty. Run ingest to build the index first.'
+    }
+
+    const docs = entries.map(e => ({
+      path: e.path,
+      title: e.title,
+      summary: e.summary,
+      tags: e.tags,
+      body: e.key_entities.join(' '),
+    }))
+    const search = new WikiSearchIndex()
+    search.setDocs(docs)
+    const results = search.query(args.query, args.topK ?? 5)
+
+    if (results.length === 0) {
+      return `No results found for: "${args.query}"`
+    }
+
+    const lines = results.map((r, i) => {
+      const excerpt = r.doc.summary ? r.doc.summary.slice(0, 120) : r.doc.tags.join(', ')
+      return `${i + 1}. [[${r.path}]] — ${r.doc.title}\n   ${excerpt}`
+    })
+    return `Search results for "${args.query}":\n\n${lines.join('\n\n')}`
+  } catch (err: any) {
+    return `Search error: ${err.message}`
+  }
+}
+
 export async function writePageTool(vault: any, args: any, _idx: string, wiki: any): Promise<string> {
   try {
     const path = await wiki.writePage(args.title, args.content, args.tags || [], args.category || 'uncategorized')
@@ -90,6 +130,7 @@ export async function executeTool(
 ): Promise<string> {
   const mc = maxFileChars || MAX_CHARS
   switch (tool) {
+    case 'bm25_search': return bm25Search(vault, args)
     case 'read_file': return readFile(vault, args.path, mc)
     case 'list_dir': return listDir(vault, args.path)
     case 'read_index': return readIndex(vault, indexPath, mc)

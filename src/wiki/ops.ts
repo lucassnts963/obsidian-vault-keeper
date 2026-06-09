@@ -4,6 +4,7 @@ import type { LLMProvider } from '../llm/provider'
 import { PROMPTS } from '../llm/provider'
 import { WikiSearchIndex, parseWikiDoc, type WikiDoc } from '../search/index-builder'
 import { IndexPersistence, type IndexEntry } from '../search/index-persistence'
+import { SlotsManager } from '../slots/manager'
 
 export class WikiOps {
   private vault: Vault
@@ -84,6 +85,14 @@ export class WikiOps {
     try {
       const index = await this.vault.adapter.read(this.settings.indexPath)
       parts.push(`## Index\n${index}`)
+    } catch {}
+
+    // Inject session focus from _slots/focus.md so the agent knows what
+    // the curator is currently working on without an extra tool call.
+    try {
+      const slots = new SlotsManager(this.vault.adapter)
+      const focus = await slots.readSlot('focus')
+      if (focus) parts.push(`## Foco Atual\n${focus}`)
     } catch {}
 
     // Select seed pages via BM25 ranking (Karpathy: compile locally, send only the
