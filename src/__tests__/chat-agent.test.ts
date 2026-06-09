@@ -42,6 +42,16 @@ describe('VaultAgent', () => {
     expect(agent.systemPrompt).toContain('Custom Agent')
   })
 
+  it('extracts ## Vault Agent section when present in AGENTS.md', async () => {
+    const v = mockVault()
+    v.files['AGENTS.md'] = '# Dev Docs\n\nPlugin development content.\n\n## Vault Agent\n\nYou are a vault assistant.\n\n## Other Section\n\nOther content.'
+    const llm = mockLLM([])
+    const agent = new VaultAgent(v as any, llm, { wikiPath: 'wiki', indexPath: 'wiki/index.md' })
+    await agent.ensureConfig()
+    expect(agent.systemPrompt).toContain('vault assistant')
+    expect(agent.systemPrompt).not.toContain('Plugin development content')
+  })
+
   it('defaults when AGENTS.md missing', async () => {
     const v = mockVault()
     const llm = mockLLM(['{"type":"answer","content":"hello"}'])

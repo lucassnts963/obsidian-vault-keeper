@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 
-import { describe, it, expect, vi, beforeEach, beforeAll } from 'vitest'
+import { describe, it, expect, vi, beforeEach, beforeAll, afterEach } from 'vitest'
 
 function mockPlugin() {
   return {
@@ -60,5 +60,22 @@ describe('ChatView', () => {
 
     const html = view.contentEl.innerHTML
     expect(html).toContain('configurado')
+  })
+
+  it('send() renders error message when agent.run() rejects', async () => {
+    const plugin = {
+      ...mockPlugin(),
+      settings: { wikiPath: 'wiki', indexPath: 'wiki/index.md', agent: { resetContext: false } },
+      agent: { run: vi.fn().mockRejectedValue(new Error('LLM timeout')) },
+    }
+    const view = new ChatView({}, plugin)
+    await view.onOpen()
+
+    // Call private send() via cast — obsidian mock creates divs for all tags,
+    // so we pass a fake input object directly instead of querying the DOM.
+    const fakeInput = { value: 'test question', disabled: false, focus: vi.fn() }
+    await (view as any).send(fakeInput)
+
+    expect(view.contentEl.innerHTML).toContain('Erro')
   })
 })

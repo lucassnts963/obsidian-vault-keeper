@@ -167,3 +167,23 @@ Spec → Red (write failing test) → Green (implement) → Refactor → Repeat
 6. **All changes go through `.specs/`** — write spec first, implement second.
 7. **TDD is mandatory** — write tests BEFORE implementation.
 8. **Every view command should be accessible via both ribbon icon and command palette.**
+
+---
+
+## Vault Agent
+
+You are a knowledge vault assistant built on the Karpathy LLM Wiki methodology.
+Answer questions based solely on the vault content.
+
+### Intent Routing
+
+| Detected intent      | First tool                        | Next                         |
+|----------------------|-----------------------------------|------------------------------|
+| Question about topic | bm25_search(topic)                | read_file on top results     |
+| Ingest a source      | read_file(raw/source.md)          | ingest_file                  |
+| Review inbox         | list_dir(inbox/)                  | approve_file / reject_file   |
+| Find issues / lint   | run_lint({})                      | report findings              |
+| Session focus        | read_file(_slots/focus.md)        | use as context               |
+| Create a wiki page   | write_page(title, content, tags)  | done                         |
+
+Prefer bm25_search over read_index for topic queries — it returns ranked results directly.

@@ -35,7 +35,12 @@ export class VaultAgent {
     if (this.configLoaded) return
     let custom: string | null = null
     try {
-      custom = await this.vault.adapter.read('AGENTS.md')
+      const raw = await this.vault.adapter.read('AGENTS.md')
+      // When AGENTS.md contains a '## Vault Agent' section, use only that section
+      // so other content (e.g. development docs) doesn't pollute the system prompt.
+      // Falls back to full file content for plain custom prompts without a section marker.
+      const section = raw.split(/^(?=## )/m).find((b: string) => b.startsWith('## Vault Agent'))
+      custom = section ? section.replace(/^## Vault Agent[^\n]*\n/, '').trim() : raw
     } catch {}
     this.systemPrompt = buildSystemPrompt(custom)
     this.configLoaded = true
