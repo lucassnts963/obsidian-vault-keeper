@@ -1,5 +1,8 @@
 const MAX_CHARS = 3000
 
+import type { SearchEngine } from '../search/index'
+import { formatSearchResults } from '../search/index'
+
 export async function readFile(vault: any, path: string, maxChars = MAX_CHARS): Promise<string> {
   try {
     const content = await vault.adapter.read(path)
@@ -26,9 +29,27 @@ export async function listDir(vault: any, dir: string): Promise<string> {
   }
 }
 
-export async function readIndex(vault: any, indexPath: string, maxChars = MAX_CHARS): Promise<string> {
+export async function readIndex(vault: any, indexPath: string, maxChars = MAX_CHARS, searchEngine?: SearchEngine): Promise<string> {
   try {
     const content = await vault.adapter.read(indexPath)
+
+    // If search engine is ready, return enhanced structured view
+    if (searchEngine && searchEngine.isReady()) {
+      const digests = searchEngine.getAll()
+      const lines = [
+        `## Vault Index (${digests.length} pages indexed)`,
+        '',
+        '| Page | Category | Tags |',
+        '|------|----------|------|',
+      ]
+      for (const d of digests) {
+        const shortPath = d.path.replace('.md', '')
+        lines.push(`| [[${shortPath}|${d.title}]] | ${d.category} | ${d.tags.slice(0, 5).join(', ')} |`)
+      }
+      return lines.join('\n')
+    }
+
+    // Fallback: raw index content
     return `## Index\n${content.slice(0, maxChars)}`
   } catch {
     return `Index not found at ${indexPath}`
@@ -85,14 +106,26 @@ export async function writePageTool(vault: any, args: any, _idx: string, wiki: a
   } catch (err: any) { return `Error: ${err.message}` }
 }
 
+export async function searchVault(_vault: any, args: any, _idx: string, _wiki: any, _llm: any, searchEngine?: SearchEngine): Promise<string> {
+  if (!searchEngine || !searchEngine.isReady()) {
+    return 'Search index not built yet. Try a specific read_file or read_index first.'
+  }
+  const query = args.query || ''
+  if (!query.trim()) return 'Please provide a search query.'
+
+  const results = searchEngine.search(query, 5)
+  return formatSearchResults(results)
+}
+
 export async function executeTool(
-  vault: any, tool: string, args: any, indexPath: string, wiki?: any, llm?: any, maxFileChars?: number,
+  vault: any, tool: string, args: any, indexPath: string, wiki?: any, llm?: any, maxFileChars?: number, searchEngine?: SearchEngine,
 ): Promise<string> {
   const mc = maxFileChars || MAX_CHARS
   switch (tool) {
     case 'read_file': return readFile(vault, args.path, mc)
     case 'list_dir': return listDir(vault, args.path)
-    case 'read_index': return readIndex(vault, indexPath, mc)
+    case 'read_index': return readIndex(vault, indexPath, mc, searchEngine)
+    case 'search_vault': return searchVault(vault, args, indexPath, wiki, llm, searchEngine)
     case 'approve_file': return approveFile(vault, args, indexPath, wiki)
     case 'reject_file': return rejectFile(vault, args, indexPath, wiki)
     case 'ingest_file': return ingestFile(vault, args, indexPath, wiki, llm)

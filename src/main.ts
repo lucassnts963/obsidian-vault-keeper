@@ -10,6 +10,7 @@ import { LLMProvider, createProvider } from './llm/provider'
 import { WikiOps } from './wiki/ops'
 import { Logger } from './wiki/log'
 import { VaultAgent } from './chat/agent'
+import { SearchEngine } from './search/index'
 
 const SYNC_ICON =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>'
@@ -71,12 +72,21 @@ export default class VaultKeeperPlugin extends Plugin {
     this.wiki = new WikiOps(this.app.vault, this.settings)
     this.logger = new Logger(this.app.vault)
 
+    // Build local search index (in-memory, no file writes)
+    const searchEngine = new SearchEngine()
+    searchEngine.build(this.app.vault, this.settings.wikiPath).then(() => {
+      console.log(`Vault Keeper: search index ready — ${searchEngine.pageCount} pages`)
+    }).catch(() => {
+      console.log('Vault Keeper: search index build deferred (wiki/ not found yet)')
+    })
+
     this.agent = new VaultAgent(
       this.app.vault, this.llm || {} as any,
       this.settings,
       this.wiki,
       this.settings.agent.maxIterations,
       this.settings.agent.maxFileChars,
+      searchEngine,
     )
 
     this.registerView(INBOX_VIEW_TYPE, (leaf) => new InboxView(leaf, this))
