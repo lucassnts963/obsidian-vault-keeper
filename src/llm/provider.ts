@@ -96,7 +96,8 @@ Retorne em formato JSON:
   "title": "Título da página",
   "category": "categoria",
   "tags": ["tag1", "tag2"],
-  "summary": "Resumo em 1 parágrafo",
+  "key_entities": ["EntidadeChave1", "EntidadeChave2"],
+  "summary": "Resumo em 2-3 frases",
   "content": "Conteúdo completo em markdown",
   "links": ["[[wiki/pagina-existente]]"]
 }`,

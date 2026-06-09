@@ -115,4 +115,21 @@ describe('InboxView', () => {
     expect(html).toContain('Approvar')
     expect(html).toContain('Rejeitar')
   })
+
+  it('approve button calls wiki.approve and catches errors without crashing', async () => {
+    plugin.wiki.approve.mockRejectedValue(new Error('falha no approve'))
+    const leaf = { view: null }
+    const view = new InboxView(leaf, plugin)
+    await view.onOpen()
+
+    const buttons = Array.from(view.contentEl.querySelectorAll('button')) as HTMLElement[]
+    const approveBtn = buttons.find(b => b.textContent === 'Approvar')
+    expect(approveBtn).toBeDefined()
+
+    approveBtn!.click()
+    await new Promise(r => setTimeout(r, 50))
+
+    // wiki.approve was invoked (button is wired up) and error was caught (no unhandled rejection)
+    expect(plugin.wiki.approve).toHaveBeenCalled()
+  })
 })

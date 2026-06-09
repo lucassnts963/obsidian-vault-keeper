@@ -142,13 +142,23 @@ export class InboxView extends ItemView {
       }
 
       button('Approvar', item.status === 'inbox', async () => {
-        await this.plugin.wiki.approve(item.file)
-        await this.refresh()
+        try {
+          await this.plugin.wiki.approve(item.file)
+          new Notice(`Aprovado: ${item.title}`)
+          await this.refresh()
+        } catch (err: any) {
+          new Notice(`Erro ao aprovar: ${err.message}`, 8000)
+        }
       }, actions)
 
       button('Rejeitar', false, async () => {
-        await this.plugin.wiki.reject(item.file)
-        await this.refresh()
+        try {
+          await this.plugin.wiki.reject(item.file)
+          new Notice(`Rejeitado: ${item.title}`)
+          await this.refresh()
+        } catch (err: any) {
+          new Notice(`Erro ao rejeitar: ${err.message}`, 8000)
+        }
       }, actions)
     }
   }

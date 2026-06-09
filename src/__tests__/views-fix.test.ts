@@ -26,9 +26,11 @@ function mockPlugin(inboxFiles: string[] = [], wikiFiles: string[] = []) {
           }),
           exists: vi.fn(async (_p: string) => true),
           mkdir: vi.fn(async () => {}),
+          write: vi.fn(async () => {}),
+          remove: vi.fn(async () => {}),
         },
       },
-      workspace: { getActiveFile: vi.fn(() => null) },
+      workspace: { getActiveFile: vi.fn(() => null), openLinkText: vi.fn() },
     },
     wiki: {
       approve: vi.fn(async () => {}),

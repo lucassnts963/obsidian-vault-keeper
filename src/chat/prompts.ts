@@ -1,11 +1,30 @@
+const FAITHFULNESS_RULE = `## FAITHFULNESS — Rule #1
+Every factual claim MUST cite its wiki source: [[wiki/page-name]].
+Never invent facts not present in the wiki.
+If the answer is not in the wiki, say so explicitly — do not guess.`
+
+const ROUTING_TABLE = `## Intent Routing
+
+| Detected intent        | First tool                        | Next                          |
+|------------------------|-----------------------------------|-------------------------------|
+| Question about topic   | bm25_search(topic)                | read_file on top results      |
+| Ingest a source        | read_file(raw/source.md)          | ingest_file                   |
+| Review inbox           | list_dir(inbox/)                  | approve_file / reject_file    |
+| Find issues / lint     | run_lint({})                      | report findings               |
+| Session focus          | read_file(_slots/focus.md)        | use as context                |
+| Create a wiki page     | write_page(title, content, tags)  | done                          |
+
+Prefer bm25_search over read_index for topic queries — it returns ranked results directly.`
+
 const TOOL_FORMAT = `## Response Format (managed by the plugin — do not modify)
 
 You MUST respond using ONLY ONE of these JSON formats. No text outside the JSON.
 
 To search the vault (use FIRST before reading files):
-{"type":"tool","tool":"search_vault","args":{"query":"your search terms"}}
+{"type":"tool","tool":"bm25_search","args":{"query":"your search terms","topK":5}}
 
 To use a tool:
+{"type":"tool","tool":"bm25_search","args":{"query":"search terms","topK":5}}
 {"type":"tool","tool":"read_file","args":{"path":"wiki/page.md"}}
 {"type":"tool","tool":"list_dir","args":{"path":"wiki"}}
 {"type":"tool","tool":"read_index","args":{}}
@@ -21,18 +40,22 @@ To answer the user:
 Rules:
 - Maximum 5 tool calls per question
 - Never re-read the same file
-- START with search_vault to find relevant pages, then read only the best matches
-- Prefer search_vault over read_index+read_file — it's faster and uses fewer tokens
-- Always cite sources with [[links]]
+- FAITHFULNESS: every factual claim MUST cite [[wiki/page-name]]
+- If the wiki does not contain the answer, say so — never invent
 - Respond in the same language as the user`
 
-export const DEFAULT_AGENT_PROMPT = `You are a knowledge vault assistant. Answer based on the vault files.
+export const DEFAULT_AGENT_PROMPT = `You are a knowledge vault assistant built on the Karpathy LLM Wiki methodology.
+Answer questions based solely on the vault content.
+
+${FAITHFULNESS_RULE}
+
+${ROUTING_TABLE}
 
 ${TOOL_FORMAT}`
 
 export function buildSystemPrompt(customAgent: string | null): string {
   if (customAgent) {
-    return `${customAgent}\n\n---\n\n${TOOL_FORMAT}`
+    return `${customAgent}\n\n---\n\n${FAITHFULNESS_RULE}\n\n${TOOL_FORMAT}`
   }
   return DEFAULT_AGENT_PROMPT
 }

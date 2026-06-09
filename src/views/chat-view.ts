@@ -106,19 +106,23 @@ export class ChatView extends ItemView {
     const context = this.plugin.settings.agent.resetContext
       ? []
       : (this.messages as any).slice(-6)
-    const response = await this.plugin.agent.run(question, context)
 
-    loading.remove()
+    try {
+      const response = await this.plugin.agent.run(question, context)
+      loading.remove()
+      this.messages.push({
+        role: 'assistant',
+        content: response.answer,
+        toolResults: response.steps.map((s: any) => ({ tool: s.tool, args: s.args, result: s.result })),
+      })
+    } catch (err: any) {
+      loading.remove()
+      this.messages.push({ role: 'assistant', content: `Erro ao consultar o agente: ${err.message}` })
+    }
 
-    this.messages.push({
-      role: 'assistant',
-      content: response.answer,
-      toolResults: response.steps.map(s => ({ tool: s.tool, args: s.args, result: s.result })),
-    })
     this.render()
-
-    input.disabled = false
-    input.focus()
+    // Query the fresh DOM — the original input reference is detached after render()
+    ;(this.contentEl.querySelector('input') as HTMLInputElement | null)?.focus()
   }
 
   private renderMessage(container: HTMLElement, msg: { role: string; content: string; toolResults?: Array<{ tool: string; args: any; result: string }> }) {
