@@ -17,18 +17,21 @@ export class WikiOps {
 
   /** Move arquivo do inbox para raw e seta status: approved */
   async approve(file: TFile): Promise<void> {
-    const content = await this.vault.read(file)
+    const content = await this.vault.adapter.read(file.path)
     const updated = this.setFrontmatterStatus(content, 'approved')
     const newPath = file.path.replace(this.settings.inboxPath, this.settings.rawPath)
-    await this.vault.create(newPath, updated)
-    await this.vault.delete(file)
+    if (!(await this.vault.adapter.exists(this.settings.rawPath))) {
+      await this.vault.adapter.mkdir(this.settings.rawPath)
+    }
+    await this.vault.adapter.write(newPath, updated)
+    await this.vault.adapter.remove(file.path)
   }
 
   /** Seta status: rejected no frontmatter (não move o arquivo) */
   async reject(file: TFile): Promise<void> {
-    const content = await this.vault.read(file)
+    const content = await this.vault.adapter.read(file.path)
     const updated = this.setFrontmatterStatus(content, 'rejected')
-    await this.vault.modify(file, updated)
+    await this.vault.adapter.write(file.path, updated)
   }
 
   /** Cria página wiki diretamente */
@@ -188,7 +191,7 @@ export class WikiOps {
     if (!file) throw new Error('Nenhum arquivo selecionado')
     if (!llm) throw new Error('LLM não configurado')
 
-    const content = await this.vault.read(file)
+    const content = await this.vault.adapter.read(file.path)
     const messages = PROMPTS.ingest(content, file.path)
     const response = await llm.chat(messages)
 
@@ -241,7 +244,7 @@ export class WikiOps {
     await persist.upsert({ path: wikiPath, title: safeTitle, summary: safeSummary, tags: safeTags, key_entities: safeKeyEntities } satisfies IndexEntry)
 
     const updatedSource = this.setFrontmatterStatus(content, 'ingested')
-    await this.vault.modify(file, updatedSource)
+    await this.vault.adapter.write(file.path, updatedSource)
   }
 
   private async updateIndex(title: string, path: string, category: string, tags: string[]) {

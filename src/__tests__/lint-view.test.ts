@@ -20,8 +20,10 @@ function mockPlugin() {
             return ''
           }),
           exists: vi.fn(async () => true),
+          write: vi.fn(async () => {}),
         },
       },
+      workspace: { openLinkText: vi.fn() },
     },
   }
 }
@@ -56,5 +58,32 @@ describe('LintView', () => {
 
     const html = view.contentEl.innerHTML
     expect(html).toContain('index')
+  })
+
+  it('renders Abrir button for each issue', async () => {
+    const plugin = mockPlugin()
+    const view = new LintView({}, plugin)
+    await view.onOpen()
+
+    const html = view.contentEl.innerHTML
+    expect(html).toContain('Abrir')
+  })
+
+  it('renders Adicionar ao index button for missing-from-index issues', async () => {
+    const plugin = mockPlugin()
+    const view = new LintView({}, plugin)
+    await view.onOpen()
+
+    const html = view.contentEl.innerHTML
+    expect(html).toContain('Adicionar')
+  })
+
+  it('renders Executar novamente refresh button', async () => {
+    const plugin = mockPlugin()
+    const view = new LintView({}, plugin)
+    await view.onOpen()
+
+    const html = view.contentEl.innerHTML
+    expect(html).toContain('Executar novamente')
   })
 })

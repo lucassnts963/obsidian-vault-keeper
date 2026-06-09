@@ -40,6 +40,7 @@ function mockVault() {
         throw new Error('ENOENT')
       }),
       stat: vi.fn(async (_p: string) => ({ mtime: Date.now(), size: 0 })),
+      remove: vi.fn(async (path: string) => { delete files[path]; delete binFiles[path] }),
     },
     read: vi.fn(async (file: any) => {
       const path = typeof file === 'string' ? file : file.path
@@ -123,6 +124,16 @@ describe('WikiOps', () => {
 
       expect(vault.files['raw/sem-frontmatter.md']).toContain('---')
       expect(vault.files['raw/sem-frontmatter.md']).toContain('status: approved')
+    })
+
+    it('uses adapter.remove — works with fake TFile (no real vault.delete needed)', async () => {
+      vault.files['inbox/nota.md'] = '---\ntitle: Nota\n---\n\nconteudo'
+
+      const ops = new WikiOps(vault as any, s)
+      await ops.approve({ path: 'inbox/nota.md' })
+
+      expect(vault.adapter.remove).toHaveBeenCalledWith('inbox/nota.md')
+      expect(vault.delete).not.toHaveBeenCalled()
     })
   })
 
