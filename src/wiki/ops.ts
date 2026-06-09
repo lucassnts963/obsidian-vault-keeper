@@ -3,6 +3,7 @@ import type { VaultKeeperSettings } from '../settings'
 import type { LLMProvider } from '../llm/provider'
 import { PROMPTS } from '../llm/provider'
 import { WikiSearchIndex, parseWikiDoc, type WikiDoc } from '../search/index-builder'
+import { IndexPersistence, type IndexEntry } from '../search/index-persistence'
 
 export class WikiOps {
   private vault: Vault
@@ -52,6 +53,9 @@ export class WikiOps {
     await this.updateIndex(title, wikiPath, category, tags)
     await this.logOperation('write', title)
 
+    const persist = new IndexPersistence(this.vault.adapter)
+    await persist.upsert({ path: wikiPath, title, summary: '', tags, key_entities: [] })
+
     return wikiPath
   }
 
@@ -82,31 +86,54 @@ export class WikiOps {
       parts.push(`## Index\n${index}`)
     } catch {}
 
-    // Rank candidate pages locally with BM25 and seed from the most relevant ones,
-    // so only the highest-signal pages spend tokens on the API (Karpathy: compile
-    // locally, send the relevant slice). The index/log files are not content pages.
+    // Select seed pages via BM25 ranking (Karpathy: compile locally, send only the
+    // relevant slice). Fast path: use persisted lightweight index so only the top-K
+    // winners require a full file read. Fallback: live scan when index is absent/empty.
     const seedPaths: string[] = []
+    let usedFastPath = false
 
     try {
-      const list = await this.vault.adapter.list(this.settings.wikiPath)
-      const mdFiles = list.files.filter((f: string) => f.endsWith('.md'))
-
-      const docs: WikiDoc[] = []
-      for (const f of mdFiles) {
-        const path = `${this.settings.wikiPath}/${f}`
-        if (path === this.settings.indexPath || path === this.settings.logPath) continue
-        try {
-          const content = await this.vault.adapter.read(path)
-          docs.push(parseWikiDoc(path, content))
-        } catch {}
-      }
-
-      const search = new WikiSearchIndex()
-      search.setDocs(docs)
-      for (const hit of search.query(question, maxPages)) {
-        seedPaths.push(hit.path)
+      const persist = new IndexPersistence(this.vault.adapter)
+      const entries = await persist.load()
+      if (entries.length > 0) {
+        const docs: WikiDoc[] = entries.map(e => ({
+          path: e.path,
+          title: e.title,
+          summary: e.summary,
+          tags: e.tags,
+          body: e.key_entities.join(' '),
+        }))
+        const search = new WikiSearchIndex()
+        search.setDocs(docs)
+        for (const hit of search.query(question, maxPages)) {
+          seedPaths.push(hit.path)
+        }
+        usedFastPath = true
       }
     } catch {}
+
+    if (!usedFastPath) {
+      try {
+        const list = await this.vault.adapter.list(this.settings.wikiPath)
+        const mdFiles = list.files.filter((f: string) => f.endsWith('.md'))
+
+        const docs: WikiDoc[] = []
+        for (const f of mdFiles) {
+          const path = `${this.settings.wikiPath}/${f}`
+          if (path === this.settings.indexPath || path === this.settings.logPath) continue
+          try {
+            const content = await this.vault.adapter.read(path)
+            docs.push(parseWikiDoc(path, content))
+          } catch {}
+        }
+
+        const search = new WikiSearchIndex()
+        search.setDocs(docs)
+        for (const hit of search.query(question, maxPages)) {
+          seedPaths.push(hit.path)
+        }
+      } catch {}
+    }
 
     const toProcess = [...seedPaths]
     for (let depth = 0; depth <= linkDepth; depth++) {
@@ -172,6 +199,8 @@ export class WikiOps {
     const safeTags = Array.isArray(proposal.tags) ? proposal.tags : []
     const safeContent = proposal.content || ''
     const safeLinks = Array.isArray(proposal.links) ? proposal.links : []
+    const safeSummary = typeof proposal.summary === 'string' ? proposal.summary.trim() : ''
+    const safeKeyEntities: string[] = Array.isArray(proposal.key_entities) ? proposal.key_entities : []
 
     const wikiPath = `${this.settings.wikiPath}/${this.slugify(safeTitle)}.md`
 
@@ -180,21 +209,27 @@ export class WikiOps {
       throw new Error(`Página wiki já existe: ${wikiPath}`)
     }
 
-    const frontmatter = [
+    const fmLines = [
       '---',
       `title: "${safeTitle}"`,
       `category: ${safeCategory}`,
       `tags: [${safeTags.join(', ')}]`,
+      ...(safeSummary ? [`summary: "${safeSummary.replace(/"/g, "'")}"`] : []),
+      ...(safeKeyEntities.length ? [`key_entities: [${safeKeyEntities.join(', ')}]`] : []),
       `date: ${new Date().toISOString().slice(0, 10)}`,
       `source: "${file.path}"`,
       '---',
-    ].join('\n')
+    ]
+    const frontmatter = fmLines.join('\n')
 
     const pageContent = `${frontmatter}\n\n# ${safeTitle}\n\n${safeContent}\n\n## Links\n\n${safeLinks.join('\n')}`
     await this.vault.create(wikiPath, pageContent)
 
     await this.updateIndex(safeTitle, wikiPath, safeCategory, safeTags)
     await this.logOperation('ingest', safeTitle, file.path)
+
+    const persist = new IndexPersistence(this.vault.adapter)
+    await persist.upsert({ path: wikiPath, title: safeTitle, summary: safeSummary, tags: safeTags, key_entities: safeKeyEntities } satisfies IndexEntry)
 
     const updatedSource = this.setFrontmatterStatus(content, 'ingested')
     await this.vault.modify(file, updatedSource)
