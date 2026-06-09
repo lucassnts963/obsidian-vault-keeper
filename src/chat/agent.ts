@@ -87,7 +87,7 @@ export class VaultAgent {
 
       let result: string
       try {
-        result = await executeTool(this.vault, toolCall.tool, toolCall.args, this.indexPath, this.wiki, this.llm)
+        result = await executeTool(this.vault, toolCall.tool, toolCall.args, this.indexPath, this.wiki, this.llm, this.maxFileChars)
       } catch (err: any) {
         result = `Tool error: ${err.message}`
       }

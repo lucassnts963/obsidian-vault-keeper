@@ -26,10 +26,10 @@ export async function listDir(vault: any, dir: string): Promise<string> {
   }
 }
 
-export async function readIndex(vault: any, indexPath: string): Promise<string> {
+export async function readIndex(vault: any, indexPath: string, maxChars = MAX_CHARS): Promise<string> {
   try {
     const content = await vault.adapter.read(indexPath)
-    return `## Index\n${content.slice(0, MAX_CHARS)}`
+    return `## Index\n${content.slice(0, maxChars)}`
   } catch {
     return `Index not found at ${indexPath}`
   }
@@ -86,12 +86,13 @@ export async function writePageTool(vault: any, args: any, _idx: string, wiki: a
 }
 
 export async function executeTool(
-  vault: any, tool: string, args: any, indexPath: string, wiki?: any, llm?: any,
+  vault: any, tool: string, args: any, indexPath: string, wiki?: any, llm?: any, maxFileChars?: number,
 ): Promise<string> {
+  const mc = maxFileChars || MAX_CHARS
   switch (tool) {
-    case 'read_file': return readFile(vault, args.path)
+    case 'read_file': return readFile(vault, args.path, mc)
     case 'list_dir': return listDir(vault, args.path)
-    case 'read_index': return readIndex(vault, indexPath)
+    case 'read_index': return readIndex(vault, indexPath, mc)
     case 'approve_file': return approveFile(vault, args, indexPath, wiki)
     case 'reject_file': return rejectFile(vault, args, indexPath, wiki)
     case 'ingest_file': return ingestFile(vault, args, indexPath, wiki, llm)

@@ -26,6 +26,11 @@ function plugin(enabled = false) {
         authorEmail: '',
         autoSyncMinutes: 0,
       },
+      agent: {
+        maxIterations: 5,
+        maxFileChars: 3000,
+        resetContext: true,
+      },
       inboxPath: 'inbox',
       rawPath: 'raw',
       wikiPath: 'wiki',

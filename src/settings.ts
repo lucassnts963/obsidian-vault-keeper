@@ -21,15 +21,20 @@ export interface GitSettings {
 export interface VaultKeeperSettings {
   llm: LLMSettings
   git: GitSettings
-  vaults: {                // multi-vault support
-    knowledge: string       // path relativo ao vault raiz
+  agent: {
+    maxIterations: number
+    maxFileChars: number
+    resetContext: boolean
+  }
+  vaults: {
+    knowledge: string
     projects: string[]
   }
-  inboxPath: string         // default: 'inbox'
-  rawPath: string           // default: 'raw'
-  wikiPath: string          // default: 'wiki'
-  logPath: string           // default: 'wiki/log.md'
-  indexPath: string         // default: 'wiki/index.md'
+  inboxPath: string
+  rawPath: string
+  wikiPath: string
+  logPath: string
+  indexPath: string
 }
 
 export const DEFAULT_SETTINGS: VaultKeeperSettings = {
@@ -48,6 +53,11 @@ export const DEFAULT_SETTINGS: VaultKeeperSettings = {
     authorName: '',
     authorEmail: '',
     autoSyncMinutes: 0,
+  },
+  agent: {
+    maxIterations: 5,
+    maxFileChars: 3000,
+    resetContext: true,
   },
   vaults: {
     knowledge: '',

@@ -71,7 +71,13 @@ export default class VaultKeeperPlugin extends Plugin {
     this.wiki = new WikiOps(this.app.vault, this.settings)
     this.logger = new Logger(this.app.vault)
 
-    this.agent = new VaultAgent(this.app.vault, this.llm || {} as any, this.settings, this.wiki)
+    this.agent = new VaultAgent(
+      this.app.vault, this.llm || {} as any,
+      this.settings,
+      this.wiki,
+      this.settings.agent.maxIterations,
+      this.settings.agent.maxFileChars,
+    )
 
     this.registerView(INBOX_VIEW_TYPE, (leaf) => new InboxView(leaf, this))
     this.registerView(CHAT_VIEW_TYPE, (leaf) => new ChatView(leaf, this))

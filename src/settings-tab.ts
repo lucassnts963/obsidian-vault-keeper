@@ -133,6 +133,46 @@ export class VaultKeeperSettingTab extends PluginSettingTab {
           })
       })
 
+    // === Agent ===
+    containerEl.createEl('h3', { text: 'Agent' })
+    new Setting(containerEl)
+      .setName('Max Iterations')
+      .setDesc('Máximo de tool calls por pergunta (1-15)')
+      .addText(t => {
+        t.inputEl.type = 'number'
+        t.setPlaceholder('5')
+          .setValue(String(this.plugin.settings.agent.maxIterations))
+          .onChange(async v => {
+            const n = Math.max(1, Math.min(15, parseInt(v, 10) || 5))
+            this.plugin.settings.agent.maxIterations = n
+            await this.plugin.saveSettings()
+          })
+      })
+
+    new Setting(containerEl)
+      .setName('Max File Chars')
+      .setDesc('Caracteres máximos lidos por arquivo (500-10000)')
+      .addText(t => {
+        t.inputEl.type = 'number'
+        t.setPlaceholder('3000')
+          .setValue(String(this.plugin.settings.agent.maxFileChars))
+          .onChange(async v => {
+            const n = Math.max(500, Math.min(10000, parseInt(v, 10) || 3000))
+            this.plugin.settings.agent.maxFileChars = n
+            await this.plugin.saveSettings()
+          })
+      })
+
+    new Setting(containerEl)
+      .setName('Reset Context')
+      .setDesc('Limpa o contexto do agente a cada pergunta')
+      .addToggle(t => t
+        .setValue(this.plugin.settings.agent.resetContext)
+        .onChange(async v => {
+          this.plugin.settings.agent.resetContext = v
+          await this.plugin.saveSettings()
+        }))
+
     // === Git ===
     containerEl.createEl('h3', { text: 'Git Sync' })
     const gitEnabled = this.plugin.settings.git.enabled
