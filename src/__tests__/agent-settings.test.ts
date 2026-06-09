@@ -40,13 +40,17 @@ describe('tools respect maxFileChars', () => {
 })
 
 describe('chat view context reset', () => {
-  it('agent.run called with empty history', async () => {
+  it('agent.run sends question to LLM', async () => {
     const { VaultAgent } = await import('../chat/agent')
     const v = { adapter: { read: async () => { throw new Error('no') } } }
     const llm = { chat: vi.fn(async () => '{"type":"answer","content":"ok"}') }
     const agent = new VaultAgent(v, llm, { wikiPath: 'w', indexPath: 'w/i.md' }, null, 5, 1000)
 
-    const response = await agent.run('question', [])
-    expect(response.answer).toBe('ok')
+    await agent.run('what is X?', [])
+    const calls = (llm.chat as any).mock.calls
+    if (calls.length === 0) throw new Error('LLM was not called')
+    const firstMessages: any[] = calls[0][0]
+    const hasQuestion = firstMessages.some((m: any) => m.role === 'user' && m.content === 'what is X?')
+    expect(hasQuestion).toBe(true)
   })
 })

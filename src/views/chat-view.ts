@@ -103,7 +103,10 @@ export class ChatView extends ItemView {
     // Loading indicator
     const loading = loadingDots(this.contentEl.querySelector('div') || this.contentEl)
 
-    const response = await this.plugin.agent.run(question, [])
+    const context = this.plugin.settings.agent.resetContext
+      ? []
+      : (this.messages as any).slice(-6)
+    const response = await this.plugin.agent.run(question, context)
 
     loading.remove()
 

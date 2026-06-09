@@ -65,7 +65,7 @@ export class VaultAgent {
 
     const messages: Message[] = [
       { role: 'system', content: this.systemPrompt },
-      ...history.slice(-10),
+      { role: 'user', content: question },
     ]
 
     const readFiles = new Set<string>()
@@ -102,7 +102,6 @@ export class VaultAgent {
 
     const finalMessages: Message[] = [
       { role: 'system', content: this.systemPrompt },
-      ...history.slice(-10),
       { role: 'user', content: 'You reached the maximum number of tool calls. Please answer the original question now based on the context gathered. Original question: ' + question },
     ]
     const finalResp = await this.llm.chat(finalMessages, { temperature: 0.3 })
