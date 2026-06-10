@@ -24,7 +24,7 @@ export interface DiagnosticReport {
   pushDryRun: ProbeResult
 }
 
-const PROBE_PATHS = ['', 'inbox', 'raw', 'wiki', '_slots', '.obsidian', '.obsidian/vault-keeper']
+const PROBE_PATHS = ['', 'inbox', 'raw', 'wiki', 'wiki/_slots', '.obsidian', '.obsidian/vault-keeper']
 const DATA_DIR = '.obsidian/vault-keeper'
 const PROBE_FILE = `${DATA_DIR}/_diag_probe.json`
 

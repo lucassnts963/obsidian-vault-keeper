@@ -32,7 +32,7 @@ describe('SlotsManager', () => {
 
   // TEST-02
   it('readSlot returns content when file exists', async () => {
-    adapter.files['_slots/focus.md'] = '# Foco\n\nProjeto Atlas'
+    adapter.files['wiki/_slots/focus.md'] = '# Foco\n\nProjeto Atlas'
     const sm = new SlotsManager(adapter)
     expect(await sm.readSlot('focus')).toContain('Projeto Atlas')
   })
@@ -42,26 +42,26 @@ describe('SlotsManager', () => {
     const sm = new SlotsManager(adapter)
     await sm.writeSlot('focus', '# Foco\n\nAtual: Karpathy')
 
-    expect(adapter.mkdir).toHaveBeenCalledWith('_slots')
-    expect(adapter.files['_slots/focus.md']).toContain('Karpathy')
+    expect(adapter.mkdir).toHaveBeenCalledWith('wiki/_slots')
+    expect(adapter.files['wiki/_slots/focus.md']).toContain('Karpathy')
   })
 
   // TEST-04
   it('writeSlot skips mkdir when _slots/ already exists', async () => {
-    adapter.dirs.push('_slots')
+    adapter.dirs.push('wiki/_slots')
     const sm = new SlotsManager(adapter)
     await sm.writeSlot('pending', 'item 1\nitem 2')
 
     expect(adapter.mkdir).not.toHaveBeenCalled()
-    expect(adapter.files['_slots/pending.md']).toContain('item 1')
+    expect(adapter.files['wiki/_slots/pending.md']).toContain('item 1')
   })
 
   it('writeSlot updates existing file content', async () => {
-    adapter.dirs.push('_slots')
-    adapter.files['_slots/focus.md'] = 'old content'
+    adapter.dirs.push('wiki/_slots')
+    adapter.files['wiki/_slots/focus.md'] = 'old content'
     const sm = new SlotsManager(adapter)
     await sm.writeSlot('focus', 'new content')
-    expect(adapter.files['_slots/focus.md']).toBe('new content')
+    expect(adapter.files['wiki/_slots/focus.md']).toBe('new content')
   })
 })
 

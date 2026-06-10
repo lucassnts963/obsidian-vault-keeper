@@ -8,7 +8,7 @@ interface VaultAdapter {
 }
 
 export class VaultInstaller {
-  private static readonly standardDirs = ['inbox', 'raw', 'wiki', '_slots', '.vault-keeper']
+  private static readonly standardDirs = ['inbox', 'raw', 'wiki', 'wiki/_slots', '.vault-keeper']
 
   constructor(private adapter: VaultAdapter) {}
 

@@ -25,7 +25,7 @@ function settings() {
   return { wikiPath: 'wiki', inboxPath: 'inbox', rawPath: 'raw', indexPath: 'wiki/index.md', logPath: 'wiki/log.md' }
 }
 
-describe('WikiOps.gatherContext — _slots/ injection', () => {
+describe('WikiOps.gatherContext — wiki/_slots/ injection', () => {
   let WikiOps: any
   let vault: ReturnType<typeof mockVault>
   let s: ReturnType<typeof settings>
@@ -41,8 +41,8 @@ describe('WikiOps.gatherContext — _slots/ injection', () => {
   })
 
   // TEST-06 — discriminant: focus content must appear in the context.
-  it('prepends focus slot content when _slots/focus.md exists', async () => {
-    vault.files['_slots/focus.md'] = '# Foco Atual\n\nProjeto Atlas — fase 2'
+  it('prepends focus slot content when wiki/_slots/focus.md exists', async () => {
+    vault.files['wiki/_slots/focus.md'] = '# Foco Atual\n\nProjeto Atlas — fase 2'
 
     const ops = new WikiOps(vault as any, s)
     const ctx = await ops.gatherContext('qualquer pergunta')
