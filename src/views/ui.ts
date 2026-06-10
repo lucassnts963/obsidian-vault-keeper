@@ -65,10 +65,11 @@ export function bubble(role: 'user' | 'agent', parent: HTMLElement): { container
   const timeStr = `${String(now.getHours()).padStart(2, '0')}:${String(now.getMinutes()).padStart(2, '0')}`
   const time = el('span', { text: timeStr, style: 'font-size:0.65em;color:var(--text-faint)' }, header)
 
-  const bubbleColor = role === 'user' ? 'var(--interactive-accent)' : 'var(--background-secondary)'
+  const bubbleColor = role === 'user' ? 'var(--interactive-accent)' : 'var(--background-modifier-form-field, var(--background-secondary))'
+  const bubbleBorder = role === 'user' ? 'none' : '1px solid var(--background-modifier-border)'
   const textColor = role === 'user' ? 'var(--text-on-accent)' : 'var(--text-normal)'
   const body = el('div', {
-    style: `display:inline-block;padding:8px 12px;border-radius:${role === 'user' ? '12px 12px 0 12px' : '12px 12px 12px 0'};background:${bubbleColor};color:${textColor};line-height:1.4`,
+    style: `display:inline-block;padding:8px 12px;border-radius:${role === 'user' ? '12px 12px 0 12px' : '12px 12px 12px 0'};background:${bubbleColor};color:${textColor};line-height:1.4;border:${bubbleBorder}`,
   }, wrapper)
 
   return { container, body, label, time }

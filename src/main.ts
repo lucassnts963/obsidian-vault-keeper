@@ -1,4 +1,4 @@
-import { Notice, Plugin, WorkspaceLeaf, addIcon } from 'obsidian'
+import { Notice, Plugin, WorkspaceLeaf, addIcon, TAbstractFile } from 'obsidian'
 import { VaultKeeperSettings, DEFAULT_SETTINGS } from './settings'
 import { VaultKeeperSettingTab } from './settings-tab'
 import { GitHubSync } from './github/sync'
@@ -40,6 +40,7 @@ export default class VaultKeeperPlugin extends Plugin {
   private syncing = false
   private lastStatusCheck = 0
   private statusCache: { remoteAhead: boolean; branch: string } | null = null
+  private saveTimers: Map<string, ReturnType<typeof setTimeout>> = new Map()
 
   async onload() {
     await this.loadSettings()
@@ -109,16 +110,19 @@ export default class VaultKeeperPlugin extends Plugin {
     this.addCommand({
       id: 'git-sync',
       name: 'Sincronizar (push + pull)',
+      hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'S' }],
       callback: () => this.doSync(),
     })
     this.addCommand({
       id: 'git-push',
       name: 'Push (enviar alterações)',
+      hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'P' }],
       callback: () => this.doPush(),
     })
     this.addCommand({
       id: 'git-pull',
       name: 'Pull (baixar alterações)',
+      hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'U' }],
       callback: () => this.doPull(),
     })
     this.addCommand({
@@ -205,6 +209,27 @@ export default class VaultKeeperPlugin extends Plugin {
 
     this.initCLIBridge()
     this.initVaultMonitor()
+
+    if (this.github) {
+      this.registerEvent(
+        this.app.vault.on('modify', (file: TAbstractFile) => {
+          if (!file.path.endsWith('.md')) return
+          const existing = this.saveTimers.get(file.path)
+          if (existing) clearTimeout(existing)
+          this.saveTimers.set(file.path, setTimeout(async () => {
+            this.saveTimers.delete(file.path)
+            if (this.syncing) return
+            try {
+              await this.github!.pushFile(file.path)
+              this.refreshStatusBar()
+            } catch (err: any) {
+              console.error('[vault-keeper] auto-push failed:', file.path, err.message)
+            }
+          }, 10_000))
+        })
+      )
+    }
+
     setTimeout(() => this.checkFirstRun(), 1500)
   }
 

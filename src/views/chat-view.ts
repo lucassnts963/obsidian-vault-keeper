@@ -1,6 +1,6 @@
 import { ItemView, WorkspaceLeaf, Notice } from 'obsidian'
 import type VaultKeeperPlugin from '../main'
-import { bubble, center, button, collapsible, loadingDots } from './ui'
+import { bubble, center, collapsible, loadingDots } from './ui'
 import { renderMarkdown } from './markdown'
 import { CLIBridge } from '../agents/cli-bridge'
 
@@ -35,7 +35,7 @@ export function extractAnswerContent(text: string): string | null {
 
 export const CHAT_VIEW_TYPE = 'vault-keeper-chat'
 
-type MessageRole = 'user' | 'agent' | 'system' | 'cli-output' | 'cli-steps' | 'cli-answer'
+type MessageRole = 'user' | 'agent' | 'system' | 'cli-steps' | 'cli-answer'
 interface ChatMessage {
   role: MessageRole
   content: string
@@ -51,6 +51,14 @@ export class ChatView extends ItemView {
   private cliElapsed = 0
   private cliTimer: ReturnType<typeof setInterval> | null = null
   private stepsOpen: Set<number> = new Set()
+  private messageEls: Map<number, HTMLElement> = new Map()
+
+  // Persistent layout elements
+  private chatAreaEl: HTMLElement | null = null
+  private progressEl: HTMLElement | null = null
+  private contBtnEl: HTMLButtonElement | null = null
+  private inputEl: HTMLInputElement | null = null
+  private layoutBuilt = false
 
   constructor(leaf: WorkspaceLeaf, plugin: VaultKeeperPlugin) {
     super(leaf)
@@ -65,11 +73,17 @@ export class ChatView extends ItemView {
     if (this.plugin.settings.cli?.preferred && this.plugin.settings.cli.preferred !== 'none') {
       this.cliBridge = new CLIBridge(this.plugin.settings)
     }
-    this.render()
+    this.buildLayout()
   }
 
-  render() {
+  private buildLayout() {
     this.contentEl.empty()
+    this.layoutBuilt = false
+    this.messageEls.clear()
+    this.chatAreaEl = null
+    this.progressEl = null
+    this.contBtnEl = null
+    this.inputEl = null
 
     const isCliMode = !!this.cliBridge
     const hasLLM = !!this.plugin.llm
@@ -83,12 +97,20 @@ export class ChatView extends ItemView {
       return
     }
 
-    // Header
+    // Outer container — flex column, full height
+    this.contentEl.style.display = 'flex'
+    this.contentEl.style.flexDirection = 'column'
+    this.contentEl.style.height = '100%'
+    this.contentEl.style.overflow = 'hidden'
+
+    // Header (flex-shrink:0)
     const header = this.contentEl.createEl('div')
     header.style.display = 'flex'
     header.style.justifyContent = 'space-between'
     header.style.alignItems = 'center'
-    header.style.marginBottom = '8px'
+    header.style.padding = '8px'
+    header.style.flexShrink = '0'
+    header.style.borderBottom = '1px solid var(--background-modifier-border)'
 
     const title = header.createEl('span')
     title.style.fontWeight = 'bold'
@@ -103,35 +125,28 @@ export class ChatView extends ItemView {
         title.textContent += ' (copiar comando)'
       }
 
-      const contBtn = header.createEl('button')
-      contBtn.textContent = '↩ Continuar sessão'
+      const contBtn = header.createEl('button') as HTMLButtonElement
+      this.contBtnEl = contBtn
       contBtn.style.fontSize = '11px'
       contBtn.style.padding = '2px 8px'
       contBtn.style.borderRadius = '4px'
       contBtn.style.cursor = 'pointer'
       contBtn.style.border = '1px solid var(--background-modifier-border)'
-      contBtn.style.background = this.continueSession
-        ? 'var(--interactive-accent)'
-        : 'var(--background-secondary)'
-      contBtn.style.color = this.continueSession
-        ? 'var(--text-on-accent)'
-        : 'var(--text-muted)'
-      contBtn.title = this.continueSession
-        ? 'Vai retomar a última sessão do CLI (--continue). Clique para desativar.'
-        : 'Clique para retomar a última sessão do CLI (--continue).'
       contBtn.addEventListener('click', () => {
         this.continueSession = !this.continueSession
-        this.render()
+        this.updateContBtn()
       })
+      this.updateContBtn()
     } else {
       title.textContent = 'Vault Chat (modo interno)'
     }
 
-    // Chat area
+    // Chat area (flex:1, overflow-y:auto)
     const chatArea = this.contentEl.createEl('div')
-    chatArea.style.maxHeight = '65vh'
+    chatArea.style.flex = '1'
     chatArea.style.overflowY = 'auto'
-    chatArea.style.marginBottom = '12px'
+    chatArea.style.padding = '8px'
+    this.chatAreaEl = chatArea
 
     if (this.messages.length === 0) {
       if (isCliMode) {
@@ -139,26 +154,35 @@ export class ChatView extends ItemView {
       } else {
         center('Pergunte algo sobre seu vault...', chatArea)
       }
+    } else {
+      this.messages.forEach((msg, idx) => {
+        const el = this.createMessageEl(msg, idx)
+        chatArea.appendChild(el)
+        this.messageEls.set(idx, el)
+      })
     }
 
-    this.messages.forEach((msg, idx) => this.renderMessage(chatArea, msg, idx))
+    // Progress element (flex-shrink:0)
+    const prog = this.contentEl.createEl('div')
+    prog.style.flexShrink = '0'
+    prog.style.fontFamily = 'var(--font-monospace)'
+    prog.style.fontSize = '12px'
+    prog.style.padding = '0 8px'
+    prog.style.color = 'var(--text-accent)'
+    prog.style.minHeight = '0'
+    this.progressEl = prog
+    this.updateProgress()
 
-    if (this.cliRunning) {
-      const dots = '.'.repeat((this.cliElapsed % 3) + 1).padEnd(3, ' ')
-      const prog = chatArea.createEl('div')
-      prog.style.fontFamily = 'var(--font-monospace)'
-      prog.style.fontSize = '12px'
-      prog.style.padding = '4px 8px'
-      prog.style.color = 'var(--text-accent)'
-      prog.textContent = `⏳ Processando${dots} ${this.cliElapsed}s`
-    }
-
-    // Input row
+    // Input row (flex-shrink:0)
     const inputRow = this.contentEl.createEl('div')
     inputRow.style.display = 'flex'
     inputRow.style.gap = '8px'
+    inputRow.style.padding = '8px'
+    inputRow.style.flexShrink = '0'
+    inputRow.style.borderTop = '1px solid var(--background-modifier-border)'
 
     const input = inputRow.createEl('input') as HTMLInputElement
+    this.inputEl = input
     input.placeholder = isCliMode
       ? 'Descreva a tarefa (ex: "ingira raw/artigo.md")…'
       : 'Pergunte algo sobre seu vault…'
@@ -169,171 +193,90 @@ export class ChatView extends ItemView {
     input.style.background = 'var(--background-primary)'
     input.style.color = 'var(--text-normal)'
 
-    const sendLabel = isCliMode ? (CLIBridge.isDesktop() ? 'Executar' : 'Copiar comando') : 'Enviar'
-    button(sendLabel, true, () => this.send(input), inputRow)
+    // Round send button with ➤ icon
+    const sendBtn = inputRow.createEl('button') as HTMLButtonElement
+    sendBtn.innerHTML = '&#10148;'
+    sendBtn.title = 'Enviar'
+    sendBtn.style.width = '36px'
+    sendBtn.style.height = '36px'
+    sendBtn.style.borderRadius = '50%'
+    sendBtn.style.border = 'none'
+    sendBtn.style.cursor = 'pointer'
+    sendBtn.style.background = 'var(--interactive-accent)'
+    sendBtn.style.color = 'var(--text-on-accent)'
+    sendBtn.style.fontSize = '16px'
+    sendBtn.style.display = 'flex'
+    sendBtn.style.alignItems = 'center'
+    sendBtn.style.justifyContent = 'center'
+    sendBtn.style.flexShrink = '0'
+    sendBtn.addEventListener('click', () => this.send(input))
 
     input.addEventListener('keydown', (e) => { if (e.key === 'Enter') this.send(input) })
 
-    setTimeout(() => { chatArea.scrollTop = chatArea.scrollHeight }, 50)
+    this.layoutBuilt = true
+    this.scrollToBottom()
   }
 
-  private async send(input: HTMLInputElement) {
-    const text = input.value.trim()
-    if (!text) return
+  private updateContBtn() {
+    if (!this.contBtnEl) return
+    const btn = this.contBtnEl
+    btn.textContent = '↩ Continuar sessão'
+    btn.style.background = this.continueSession
+      ? 'var(--interactive-accent)'
+      : 'var(--background-secondary)'
+    btn.style.color = this.continueSession
+      ? 'var(--text-on-accent)'
+      : 'var(--text-muted)'
+    btn.title = this.continueSession
+      ? 'Vai retomar a última sessão do CLI (--continue). Clique para desativar.'
+      : 'Clique para retomar a última sessão do CLI (--continue).'
+  }
 
-    input.value = ''
-    input.disabled = true
-
-    this.messages.push({ role: 'user', content: text })
-    this.render()
-
-    if (this.cliBridge) {
-      await this.sendToCLI(text)
+  private updateProgress() {
+    if (!this.progressEl) return
+    if (this.cliRunning) {
+      const dots = '.'.repeat((this.cliElapsed % 3) + 1).padEnd(3, ' ')
+      this.progressEl.textContent = `⏳ Processando${dots} ${this.cliElapsed}s`
+      this.progressEl.style.padding = '4px 8px'
     } else {
-      await this.sendToLLM(text)
+      this.progressEl.textContent = ''
+      this.progressEl.style.padding = '0 8px'
     }
-
-    this.render()
-    ;(this.contentEl.querySelector('input') as HTMLInputElement | null)?.focus()
   }
 
-  private async sendToCLI(text: string) {
-    const task = this.parseTask(text)
-    const cmd = this.cliBridge!.buildCommand(task.type, task.args, this.continueSession)
+  private appendMessageEl(msg: ChatMessage, idx: number) {
+    if (!this.chatAreaEl) return
 
-    if (!cmd) {
-      this.messages.push({ role: 'system', content: 'CLI não configurado — configure em Settings.' })
+    // Remove empty-state placeholder if present
+    const placeholder = this.chatAreaEl.querySelector('[data-placeholder]')
+    if (placeholder) placeholder.remove()
+
+    const el = this.createMessageEl(msg, idx)
+    this.chatAreaEl.appendChild(el)
+    this.messageEls.set(idx, el)
+    this.scrollToBottom()
+  }
+
+  private updateMessageEl(idx: number, msg: ChatMessage) {
+    const el = this.messageEls.get(idx)
+    if (!el) {
+      this.appendMessageEl(msg, idx)
       return
     }
-
-    if (!CLIBridge.isDesktop()) {
-      navigator.clipboard.writeText(cmd).catch(() => {})
-      new Notice('Comando copiado para a área de transferência')
-      this.messages.push({ role: 'cli-output', content: `Comando copiado:\n\`\`\`\n${cmd}\n\`\`\`` })
-      return
-    }
-
-    this.messages.push({ role: 'system', content: `▶ ${cmd}` })
-
-    // Reserve slots for steps (collapsible) and answer (markdown) — updated in place
-    const stepsIdx = this.messages.length
-    this.messages.push({ role: 'cli-steps', content: '' })
-    this.stepsOpen.add(stepsIdx) // auto-open while running
-
-    const answerIdx = this.messages.length
-    this.messages.push({ role: 'cli-answer', content: '' })
-
-    this.cliRunning = true
-    this.cliElapsed = 0
-    this.cliTimer = setInterval(() => { this.cliElapsed++; this.render() }, 1000)
-    this.render()
-
-    const stepLines: string[] = []
-    const outLines: string[] = []
-    let timedOut = false
-
-    try {
-      const vaultPath = (this.plugin.app.vault.adapter as any).basePath || '.'
-      const result = await this.cliBridge!.spawn(
-        cmd,
-        vaultPath,
-        (line) => {
-          const clean = stripAnsi(line)
-          if (!clean.trim()) return
-          outLines.push(clean)
-          this.messages[answerIdx] = { role: 'cli-answer', content: outLines.join('\n') }
-          this.render()
-        },
-        (line) => {
-          const clean = stripAnsi(line)
-          if (!clean.trim()) return
-          stepLines.push(clean)
-          this.messages[stepsIdx] = { role: 'cli-steps', content: stepLines.join('\n') }
-          this.render()
-        },
-      )
-      timedOut = result.timedOut
-    } catch (err: any) {
-      this.messages.push({ role: 'system', content: `Erro ao executar CLI: ${err.message}` })
-    } finally {
-      if (this.cliTimer) { clearInterval(this.cliTimer); this.cliTimer = null }
-      this.cliRunning = false
-
-      // Remove empty placeholder messages
-      if (!stepLines.length) this.messages.splice(stepsIdx, 1)
-      const finalAnswerIdx = this.messages.findIndex(m => m.role === 'cli-answer' && !m.content)
-      if (finalAnswerIdx !== -1) this.messages.splice(finalAnswerIdx, 1)
-
-      if (timedOut) {
-        this.messages.push({
-          role: 'system',
-          content: `⏱️ Timeout (${this.cliElapsed}s): processo encerrado. O CLI pode não suportar modo não-interativo.`,
-        })
-      } else if (!outLines.length && !stepLines.length) {
-        this.messages.push({
-          role: 'system',
-          content: `⚠️ CLI concluiu sem produzir saída (${this.cliElapsed}s).`,
-        })
-      } else {
-        this.messages.push({ role: 'system', content: `✅ Concluído (${this.cliElapsed}s)` })
-      }
-    }
+    el.empty()
+    this.fillMessageEl(el, msg, idx)
+    this.scrollToBottom()
   }
 
-  private parseTask(text: string): { type: 'ingest' | 'lint' | 'query' | 'focus'; args: Record<string, string> } {
-    const lower = text.toLowerCase()
-
-    // Ingest — PT: ingira, ingerir, processar / EN: ingest, process file
-    if (/\b(ingest|ingir|ingira|ingerir|processar)\b/.test(lower)) {
-      const fileMatch = text.match(/raw\/[\w\-./ ]+\.md/)
-      return { type: 'ingest', args: fileMatch ? { file: fileMatch[0] } : {} }
-    }
-
-    // Lint/audit — PT: lint, auditoria, auditar, verificar vault / EN: lint, audit
-    if (/\b(lint|auditoria|auditar|verificar vault|audit)\b/.test(lower)) {
-      return { type: 'lint', args: {} }
-    }
-
-    // Focus WRITE — only when explicitly setting/updating focus, not when reading/asking about it.
-    // PT: "definir foco", "atualizar foco", "meu foco é X" / EN: "set focus", "focus on", "focus: X"
-    if (
-      /\b(definir foco|atualizar foco|setar foco|set focus|update focus|focus on)\b/.test(lower) ||
-      /\bmeu foco (é|sera|será|vai ser)\b/.test(lower) ||
-      /^foco:\s*/i.test(text) ||
-      /^focus:\s*/i.test(text)
-    ) {
-      return { type: 'focus', args: { description: text } }
-    }
-
-    // Default: query — includes "qual é meu foco?", topic questions, etc.
-    return { type: 'query', args: { question: text } }
+  private createMessageEl(msg: ChatMessage, idx: number): HTMLElement {
+    const wrapper = document.createElement('div')
+    // Add empty() method for compatibility
+    ;(wrapper as any).empty = () => { while (wrapper.firstChild) wrapper.removeChild(wrapper.firstChild) }
+    this.fillMessageEl(wrapper, msg, idx)
+    return wrapper
   }
 
-  private async sendToLLM(question: string) {
-    if (!this.plugin.llm || !this.plugin.agent) return
-
-    const chatArea = this.contentEl.querySelector('div') || this.contentEl
-    const loading = loadingDots(chatArea)
-
-    const context = this.plugin.settings.agent.resetContext
-      ? []
-      : (this.messages as any).slice(-6)
-
-    try {
-      const response = await this.plugin.agent.run(question, context)
-      loading.remove()
-      this.messages.push({
-        role: 'agent',
-        content: response.answer,
-        toolResults: response.steps.map((s: any) => ({ tool: s.tool, args: s.args, result: s.result })),
-      })
-    } catch (err: any) {
-      loading.remove()
-      this.messages.push({ role: 'agent', content: `Erro: ${err.message}` })
-    }
-  }
-
-  private renderMessage(container: HTMLElement, msg: ChatMessage, msgIndex = -1) {
+  private fillMessageEl(container: HTMLElement, msg: ChatMessage, msgIndex = -1) {
     if (msg.toolResults && msg.toolResults.length > 0) {
       for (const tc of msg.toolResults) {
         const argStr = Object.entries(tc.args)
@@ -392,16 +335,6 @@ export class ChatView extends ItemView {
       return
     }
 
-    if (msg.role === 'cli-output') {
-      const el = container.createEl('div')
-      el.style.fontFamily = 'var(--font-monospace)'
-      el.style.fontSize = '12px'
-      el.style.padding = '4px 8px'
-      el.style.color = 'var(--text-muted)'
-      el.textContent = msg.content
-      return
-    }
-
     if (msg.role === 'system') {
       const el = container.createEl('div')
       el.style.fontSize = '12px'
@@ -429,5 +362,207 @@ export class ChatView extends ItemView {
         if (path) this.plugin.app.workspace.openLinkText(path, '', true)
       })
     })
+  }
+
+  private scrollToBottom() {
+    if (!this.chatAreaEl) return
+    const el = this.chatAreaEl
+    requestAnimationFrame(() => {
+      el.scrollTop = el.scrollHeight
+    })
+  }
+
+  private async send(input: HTMLInputElement) {
+    const text = input.value.trim()
+    if (!text) return
+
+    input.value = ''
+    input.disabled = true
+
+    const userMsg: ChatMessage = { role: 'user', content: text }
+    const userIdx = this.messages.length
+    this.messages.push(userMsg)
+    this.appendMessageEl(userMsg, userIdx)
+
+    if (this.cliBridge) {
+      await this.sendToCLI(text)
+    } else {
+      await this.sendToLLM(text)
+    }
+
+    input.disabled = false
+    input.focus()
+  }
+
+  private async sendToCLI(text: string) {
+    const task = this.parseTask(text)
+    const cmd = this.cliBridge!.buildCommand(task.type, task.args, this.continueSession)
+
+    if (!cmd) {
+      const sysMsg: ChatMessage = { role: 'system', content: 'CLI não configurado — configure em Settings.' }
+      const sysIdx = this.messages.length
+      this.messages.push(sysMsg)
+      this.appendMessageEl(sysMsg, sysIdx)
+      return
+    }
+
+    if (!CLIBridge.isDesktop()) {
+      navigator.clipboard.writeText(cmd).catch(() => {})
+      new Notice('Comando copiado para a área de transferência')
+      const copyMsg: ChatMessage = { role: 'system', content: `Comando copiado:\n\`\`\`\n${cmd}\n\`\`\`` }
+      const copyIdx = this.messages.length
+      this.messages.push(copyMsg)
+      this.appendMessageEl(copyMsg, copyIdx)
+      return
+    }
+
+    const cmdMsg: ChatMessage = { role: 'system', content: `▶ ${cmd}` }
+    const cmdIdx = this.messages.length
+    this.messages.push(cmdMsg)
+    this.appendMessageEl(cmdMsg, cmdIdx)
+
+    // Reserve slots for steps (collapsible) and answer (markdown) — updated in place
+    const stepsIdx = this.messages.length
+    const stepsMsg: ChatMessage = { role: 'cli-steps', content: '' }
+    this.messages.push(stepsMsg)
+    this.stepsOpen.add(stepsIdx) // auto-open while running
+    this.appendMessageEl(stepsMsg, stepsIdx)
+
+    const answerIdx = this.messages.length
+    const answerMsg: ChatMessage = { role: 'cli-answer', content: '' }
+    this.messages.push(answerMsg)
+    this.appendMessageEl(answerMsg, answerIdx)
+
+    this.cliRunning = true
+    this.cliElapsed = 0
+    this.cliTimer = setInterval(() => {
+      this.cliElapsed++
+      this.updateProgress()
+    }, 1000)
+    this.updateProgress()
+
+    const stepLines: string[] = []
+    const outLines: string[] = []
+    let timedOut = false
+
+    try {
+      const vaultPath = (this.plugin.app.vault.adapter as any).basePath || '.'
+      const result = await this.cliBridge!.spawn(
+        cmd,
+        vaultPath,
+        (line) => {
+          const clean = stripAnsi(line)
+          if (!clean.trim()) return
+          outLines.push(clean)
+          this.messages[answerIdx] = { role: 'cli-answer', content: outLines.join('\n') }
+          this.updateMessageEl(answerIdx, this.messages[answerIdx])
+        },
+        (line) => {
+          const clean = stripAnsi(line)
+          if (!clean.trim()) return
+          stepLines.push(clean)
+          this.messages[stepsIdx] = { role: 'cli-steps', content: stepLines.join('\n') }
+          this.updateMessageEl(stepsIdx, this.messages[stepsIdx])
+        },
+      )
+      timedOut = result.timedOut
+    } catch (err: any) {
+      const errMsg: ChatMessage = { role: 'system', content: `Erro ao executar CLI: ${err.message}` }
+      const errIdx = this.messages.length
+      this.messages.push(errMsg)
+      this.appendMessageEl(errMsg, errIdx)
+    } finally {
+      if (this.cliTimer) { clearInterval(this.cliTimer); this.cliTimer = null }
+      this.cliRunning = false
+      this.updateProgress()
+
+      // Remove empty placeholder messages from DOM
+      if (!stepLines.length) {
+        const stepsEl = this.messageEls.get(stepsIdx)
+        if (stepsEl) stepsEl.remove()
+        this.messageEls.delete(stepsIdx)
+      }
+      const emptyAnswerEl = this.messageEls.get(answerIdx)
+      if (!outLines.length && emptyAnswerEl) {
+        emptyAnswerEl.remove()
+        this.messageEls.delete(answerIdx)
+      }
+
+      let finalMsg: ChatMessage
+      if (timedOut) {
+        finalMsg = {
+          role: 'system',
+          content: `⏱️ Timeout (${this.cliElapsed}s): processo encerrado. O CLI pode não suportar modo não-interativo.`,
+        }
+      } else if (!outLines.length && !stepLines.length) {
+        finalMsg = {
+          role: 'system',
+          content: `⚠️ CLI concluiu sem produzir saída (${this.cliElapsed}s).`,
+        }
+      } else {
+        finalMsg = { role: 'system', content: `✅ Concluído (${this.cliElapsed}s)` }
+      }
+      const finalIdx = this.messages.length
+      this.messages.push(finalMsg)
+      this.appendMessageEl(finalMsg, finalIdx)
+    }
+  }
+
+  private parseTask(text: string): { type: 'ingest' | 'lint' | 'query' | 'focus'; args: Record<string, string> } {
+    const lower = text.toLowerCase()
+
+    // Ingest — PT: ingira, ingerir, processar / EN: ingest, process file
+    if (/\b(ingest|ingir|ingira|ingerir|processar)\b/.test(lower)) {
+      const fileMatch = text.match(/raw\/[\w\-./ ]+\.md/)
+      return { type: 'ingest', args: fileMatch ? { file: fileMatch[0] } : {} }
+    }
+
+    // Lint/audit — PT: lint, auditoria, auditar, verificar vault / EN: lint, audit
+    if (/\b(lint|auditoria|auditar|verificar vault|audit)\b/.test(lower)) {
+      return { type: 'lint', args: {} }
+    }
+
+    // Focus WRITE — only when explicitly setting/updating focus, not when reading/asking about it.
+    // PT: "definir foco", "atualizar foco", "meu foco é X" / EN: "set focus", "focus on", "focus: X"
+    if (
+      /\b(definir foco|atualizar foco|setar foco|set focus|update focus|focus on)\b/.test(lower) ||
+      /\bmeu foco (é|sera|será|vai ser)\b/.test(lower) ||
+      /^foco:\s*/i.test(text) ||
+      /^focus:\s*/i.test(text)
+    ) {
+      return { type: 'focus', args: { description: text } }
+    }
+
+    // Default: query — includes "qual é meu foco?", topic questions, etc.
+    return { type: 'query', args: { question: text } }
+  }
+
+  private async sendToLLM(question: string) {
+    if (!this.plugin.llm || !this.plugin.agent) return
+
+    const loading = this.chatAreaEl ? loadingDots(this.chatAreaEl) : null
+
+    const context = this.plugin.settings.agent?.resetContext
+      ? []
+      : (this.messages as any).slice(-6)
+
+    try {
+      const response = await this.plugin.agent.run(question, context)
+      if (loading) loading.remove()
+      const agentMsg: ChatMessage = {
+        role: 'agent',
+        content: response.answer,
+        toolResults: response.steps.map((s: any) => ({ tool: s.tool, args: s.args, result: s.result })),
+      }
+      const agentIdx = this.messages.length
+      this.messages.push(agentMsg)
+      this.appendMessageEl(agentMsg, agentIdx)
+    } catch (err: any) {
+      if (loading) loading.remove()
+      const errMsg: ChatMessage = { role: 'agent', content: `Erro: ${err.message}` }
+      const errIdx = this.messages.length
+      this.messages.push(errMsg)
+      this.appendMessageEl(errMsg, errIdx)
+    }
   }
 }
