@@ -132,13 +132,20 @@ export class CLIBridge {
     const { spawn } = require('child_process')
 
     return new Promise((resolve, reject) => {
-      // stdin: 'ignore' sends EOF immediately — TUI CLIs detect no-TTY and stop hanging.
-      // CI=1 + NO_COLOR=1 + TERM=dumb signal non-interactive mode to most modern CLIs.
+      // opencode is a TUI — needs CI=1 + TERM=dumb to enter non-interactive mode.
+      // Other CLIs (agy, claude, gemini) work with their default env; CI=1 can
+      // suppress their output entirely, so we only set NO_COLOR to keep ANSI clean.
+      const pref = this.settings.cli?.preferred
+      const env = pref === 'opencode'
+        ? { ...process.env, CI: '1', NO_COLOR: '1', TERM: 'dumb' }
+        : { ...process.env, NO_COLOR: '1' }
+
+      // stdin: 'ignore' sends EOF immediately — prevents TUI CLIs from hanging.
       const proc = spawn(command, {
         cwd,
         shell: true,
         stdio: ['ignore', 'pipe', 'pipe'],
-        env: { ...process.env, CI: '1', NO_COLOR: '1', TERM: 'dumb' },
+        env,
       })
       const lines: string[] = []
       let timedOut = false
