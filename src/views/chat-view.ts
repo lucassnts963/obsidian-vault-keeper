@@ -39,6 +39,7 @@ export class ChatView extends ItemView {
   plugin: VaultKeeperPlugin
   private messages: ChatMessage[] = []
   private cliBridge: CLIBridge | null = null
+  private continueSession = false
 
   constructor(leaf: WorkspaceLeaf, plugin: VaultKeeperPlugin) {
     super(leaf)
@@ -90,6 +91,27 @@ export class ChatView extends ItemView {
       } else {
         title.textContent += ' (copiar comando)'
       }
+
+      const contBtn = header.createEl('button')
+      contBtn.textContent = '↩ Continuar sessão'
+      contBtn.style.fontSize = '11px'
+      contBtn.style.padding = '2px 8px'
+      contBtn.style.borderRadius = '4px'
+      contBtn.style.cursor = 'pointer'
+      contBtn.style.border = '1px solid var(--background-modifier-border)'
+      contBtn.style.background = this.continueSession
+        ? 'var(--interactive-accent)'
+        : 'var(--background-secondary)'
+      contBtn.style.color = this.continueSession
+        ? 'var(--text-on-accent)'
+        : 'var(--text-muted)'
+      contBtn.title = this.continueSession
+        ? 'Vai retomar a última sessão do CLI (--continue). Clique para desativar.'
+        : 'Clique para retomar a última sessão do CLI (--continue).'
+      contBtn.addEventListener('click', () => {
+        this.continueSession = !this.continueSession
+        this.render()
+      })
     } else {
       title.textContent = 'Vault Chat (modo interno)'
     }
@@ -158,7 +180,7 @@ export class ChatView extends ItemView {
 
   private async sendToCLI(text: string) {
     const task = this.parseTask(text)
-    const cmd = this.cliBridge!.buildCommand(task.type, task.args)
+    const cmd = this.cliBridge!.buildCommand(task.type, task.args, this.continueSession)
 
     if (!cmd) {
       this.messages.push({ role: 'system', content: 'CLI não configurado — configure em Settings.' })

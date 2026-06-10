@@ -65,21 +65,31 @@ export class CLIBridge {
     }
   }
 
-  buildCommand(task: 'ingest' | 'lint' | 'query' | 'focus', args: Record<string, string> = {}): string {
+  buildCommand(
+    task: 'ingest' | 'lint' | 'query' | 'focus',
+    args: Record<string, string> = {},
+    continueSession = false,
+  ): string {
     const cli = this.resolvedBinary()
     if (!cli) return ''
 
     const pref = this.settings.cli?.preferred
     const instrFile = pref === 'gemini' ? 'GEMINI.md' : pref === 'opencode' ? 'AGENTS.md' : 'CLAUDE.md'
 
-    // Each CLI has its own non-interactive invocation syntax:
-    //   claude  → claude -p "message"
-    //   gemini  → gemini -p "message"
-    //   opencode → opencode run "message"
+    // Session continuation flags per CLI:
+    //   claude   → --continue
+    //   opencode → --continue  (placed after `run`)
+    //   gemini   → --continue
+    const cont = continueSession ? ' --continue' : ''
+
+    // Non-interactive invocation syntax per CLI:
+    //   claude   → claude [--continue] -p "message"
+    //   gemini   → gemini [--continue] -p "message"
+    //   opencode → opencode run [--continue] "message"
     const prompt = (message: string) =>
       pref === 'opencode'
-        ? `${cli} run "${message}"`
-        : `${cli} -p "${message}"`
+        ? `${cli} run${cont} "${message}"`
+        : `${cli}${cont} -p "${message}"`
 
     switch (task) {
       case 'ingest':
