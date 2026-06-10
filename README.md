@@ -2,11 +2,13 @@
 
 Plugin para **gestão completa de conhecimento** seguindo a metodologia LLM Wiki (Karpathy adaptado).
 
-Delega inteligência a um CLI externo instalado (Claude Code, OpenCode, Gemini CLI) e cai de volta para LLM interno quando nenhum CLI é detectado.
+Delega inteligência a um CLI externo instalado e cai de volta para LLM interno quando nenhum CLI é detectado.
 
 ## Status
 
-✅ **Beta funcional** — 221 testes passando, 28 arquivos de teste. Scaffold completo, wizard de onboarding, CLI bridge, BM25 search, monitor automático, build de produção OK (76 KB).
+✅ **Beta funcional** — 221 testes passando, 28 arquivos de teste. Scaffold completo, wizard de onboarding, CLI bridge, BM25 search, monitor automático, build de produção OK (84 KB).
+
+**CLI testado:** OpenCode ✅ — Claude Code, Gemini CLI, Antigravity e Custom estão implementados mas ainda não foram testados em produção.
 
 ---
 
@@ -15,7 +17,7 @@ Delega inteligência a um CLI externo instalado (Claude Code, OpenCode, Gemini C
 | Fase | Ícone | O que faz |
 |------|-------|-----------|
 | **Onboarding** | 🚀 | Wizard de primeira execução: "Começar do zero" ou "Migrar vault existente" — cria estrutura, gera CLAUDE.md / GEMINI.md / AGENTS.md automaticamente |
-| **CLI Bridge** | 🤖 | Detecta Claude Code / OpenCode / Gemini CLI instalados. Desktop: spawna e transmite saída linha a linha. Mobile: copia comando para clipboard |
+| **CLI Bridge** | 🤖 | Detecta CLIs instalados. Desktop: spawna e transmite saída linha a linha. Mobile: copia comando para clipboard. **Testado:** OpenCode ✅ — demais CLIs implementados, não testados |
 | **Inbox** | 📥 | Painel com filtro por status. Aprovar/rejeitar com botões |
 | **Approve** | ✅ | Move fonte pra `raw/`, seta `status: approved`, registra no log |
 | **Ingest** | 🧠 | LLM/CLI lê a fonte → propõe página wiki com citações + frontmatter rico (`title`, `summary`, `key_entities`, `tags`) |
@@ -40,7 +42,7 @@ The plugin understands **Portuguese and English**. Agent prompts, CLI instructio
 ```
 ChatView detecta CLI instalado?
   │
-  ├─ SIM (desktop) ──→ spawna claude/opencode/gemini
+  ├─ SIM (desktop) ──→ spawna CLI (opencode ✅ / outros não testados)
   │                        └─ streama stdout → bolhas de chat
   │
   ├─ SIM (mobile)  ──→ copia comando para clipboard
@@ -119,7 +121,7 @@ Copiar `main.js` e `manifest.json` para `.obsidian/plugins/vault-keeper/` no seu
 
 ## Configuração
 
-1. **CLI** (recomendado): instale Claude Code (`npm i -g @anthropic-ai/claude-code`), OpenCode ou Gemini CLI — o plugin detecta automaticamente e salva a preferência
+1. **CLI** (recomendado): instale **OpenCode** (✅ testado) ou outro CLI compatível — o plugin detecta automaticamente e salva a preferência. Claude Code, Gemini CLI e Antigravity estão implementados mas ainda não foram testados
 2. **LLM** (fallback): endpoint + modelo + API key
 3. **Git Sync**: remote URL + token GitHub. Estratégia de conflito: `ask` (backup + sobrescrever), `keep-local` (não sobrescreve modificações locais), `keep-remote` (sobrescreve sempre)
 4. **Vaults**: paths dos vaults de projeto (reservado para cross-ingest)

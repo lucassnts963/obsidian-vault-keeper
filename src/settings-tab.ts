@@ -79,11 +79,11 @@ export class VaultKeeperSettingTab extends PluginSettingTab {
       .setDesc('Agente CLI a usar (requer instalação). "none" usa o agente LLM interno.')
       .addDropdown(d => d
         .addOption('none', 'Nenhum (modo interno)')
-        .addOption('claude', 'Claude Code')
-        .addOption('opencode', 'OpenCode')
-        .addOption('gemini', 'Gemini CLI')
-        .addOption('agy', 'Antigravity')
-        .addOption('custom', 'Customizado')
+        .addOption('claude', 'Claude Code (não testado)')
+        .addOption('opencode', 'OpenCode ✅')
+        .addOption('gemini', 'Gemini CLI (não testado)')
+        .addOption('agy', 'Antigravity (não testado)')
+        .addOption('custom', 'Customizado (não testado)')
         .setValue(this.plugin.settings.cli?.preferred || 'none')
         .onChange(async v => {
           if (!this.plugin.settings.cli) {

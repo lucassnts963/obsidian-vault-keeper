@@ -1,6 +1,8 @@
 # AGENTS.md — Vault Keeper
 
-> Obsidian plugin for complete knowledge management methodology: inbox → approve → ingest → wiki → query → lint → cross-ingest. Delegates intelligence to an installed external CLI (Claude Code, OpenCode, Gemini CLI) and falls back to a built-in LLM provider when no CLI is detected.
+> Obsidian plugin for complete knowledge management methodology: inbox → approve → ingest → wiki → query → lint → cross-ingest. Delegates intelligence to an installed external CLI and falls back to a built-in LLM provider when no CLI is detected.
+>
+> **CLI status:** OpenCode ✅ tested in production — Claude Code, Gemini CLI, Antigravity (`agy`) and Custom are implemented but not yet tested.
 
 ## Overview
 
@@ -63,7 +65,7 @@ src/
 ├── settings-tab.ts           # Obsidian SettingTab UI
 │
 ├── agents/
-│   ├── cli-bridge.ts         # CLIBridge: detect Claude Code / OpenCode / Gemini, build CLAUDE.md / GEMINI.md / AGENTS.md, spawn tasks
+│   ├── cli-bridge.ts         # CLIBridge: detect CLI (opencode ✅ / others not tested), build CLAUDE.md / GEMINI.md / AGENTS.md, spawn tasks
 │   └── monitor.ts            # VaultIntegrityMonitor: watch wiki/ → debounced BM25 reindex
 │
 ├── scaffold/
@@ -190,11 +192,12 @@ inbox/*.md  ──approve──▶  raw/*.md  ──ingest──▶  wiki/*.md
 
 ### Detection Priority
 
-1. `claude` (Claude Code)
-2. `opencode`
-3. `gemini`
-4. Custom binary path (from `CLISettings.customBinaryPath`)
-5. None → fall back to internal LLM
+1. `opencode` ✅ tested
+2. `claude` (Claude Code) — implemented, not tested
+3. `gemini` — implemented, not tested
+4. `agy` (Antigravity) — implemented, not tested
+5. Custom binary path (from `CLISettings.customBinaryPath`) — implemented, not tested
+6. None → fall back to internal LLM
 
 ### Instruction Files Generated
 
