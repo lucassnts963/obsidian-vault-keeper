@@ -87,7 +87,7 @@ export class VaultKeeperSettingTab extends PluginSettingTab {
         .setValue(this.plugin.settings.cli?.preferred || 'none')
         .onChange(async v => {
           if (!this.plugin.settings.cli) {
-            this.plugin.settings.cli = { preferred: 'none', customBinaryPath: '', autoDetect: true }
+            this.plugin.settings.cli = { preferred: 'none', customBinaryPath: '', autoDetect: true, timeoutMinutes: 5 }
           }
           this.plugin.settings.cli.preferred = v as any
           await this.plugin.saveSettings()
@@ -101,7 +101,7 @@ export class VaultKeeperSettingTab extends PluginSettingTab {
         .setValue(this.plugin.settings.cli?.autoDetect ?? true)
         .onChange(async v => {
           if (!this.plugin.settings.cli) {
-            this.plugin.settings.cli = { preferred: 'none', customBinaryPath: '', autoDetect: true }
+            this.plugin.settings.cli = { preferred: 'none', customBinaryPath: '', autoDetect: true, timeoutMinutes: 5 }
           }
           this.plugin.settings.cli.autoDetect = v
           await this.plugin.saveSettings()
@@ -119,6 +119,22 @@ export class VaultKeeperSettingTab extends PluginSettingTab {
             await this.plugin.saveSettings()
           }))
     }
+
+    new Setting(containerEl)
+      .setName('Timeout do CLI (minutos)')
+      .setDesc('Tempo máximo de execução do CLI. 0 = sem limite (recomendado para opencode).')
+      .addText(t => {
+        t.inputEl.type = 'number'
+        t.setPlaceholder('5')
+          .setValue(String(this.plugin.settings.cli?.timeoutMinutes ?? 5))
+          .onChange(async v => {
+            if (!this.plugin.settings.cli) {
+              this.plugin.settings.cli = { preferred: 'none', customBinaryPath: '', autoDetect: true, timeoutMinutes: 5 }
+            }
+            this.plugin.settings.cli.timeoutMinutes = Math.max(0, parseInt(v, 10) || 0)
+            await this.plugin.saveSettings()
+          })
+      })
 
     // === LLM ===
     containerEl.createEl('h3', { text: 'LLM' })

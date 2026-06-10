@@ -25,6 +25,7 @@ export interface CLISettings {
   preferred: 'claude' | 'opencode' | 'gemini' | 'agy' | 'custom' | 'none'
   customBinaryPath: string
   autoDetect: boolean
+  timeoutMinutes: number  // 0 = sem timeout
 }
 
 export interface VaultKeeperSettings {
@@ -70,6 +71,7 @@ export const DEFAULT_SETTINGS: VaultKeeperSettings = {
     preferred: 'none',
     customBinaryPath: '',
     autoDetect: true,
+    timeoutMinutes: 5,
   },
   agent: {
     maxIterations: 5,

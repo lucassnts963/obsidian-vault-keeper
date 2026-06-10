@@ -447,8 +447,8 @@ export class ChatView extends ItemView {
 
     try {
       const vaultPath = (this.plugin.app.vault.adapter as any).basePath || '.'
-      // opencode is a long-running TUI that may take many minutes — no timeout
-      const spawnTimeout = this.plugin.settings.cli?.preferred === 'opencode' ? 0 : 300_000
+      const timeoutMins = this.plugin.settings.cli?.timeoutMinutes ?? 5
+      const spawnTimeout = timeoutMins === 0 ? 0 : timeoutMins * 60_000
       const result = await this.cliBridge!.spawn(
         cmd,
         vaultPath,
