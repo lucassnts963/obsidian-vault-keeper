@@ -121,7 +121,8 @@ export class CLIBridge {
     command: string,
     cwd: string,
     onLine: (line: string) => void,
-  ): Promise<{ exitCode: number; stdout: string }> {
+    timeoutMs = 300_000,
+  ): Promise<{ exitCode: number; stdout: string; timedOut: boolean }> {
     if (!CLIBridge.isDesktop()) {
       throw new Error('spawn() only available on desktop (Electron)')
     }
@@ -129,8 +130,22 @@ export class CLIBridge {
     const { spawn } = require('child_process')
 
     return new Promise((resolve, reject) => {
-      const proc = spawn(command, { cwd, shell: true })
+      // stdin: 'ignore' sends EOF immediately — TUI CLIs detect no-TTY and stop hanging.
+      // CI=1 + NO_COLOR=1 + TERM=dumb signal non-interactive mode to most modern CLIs.
+      const proc = spawn(command, {
+        cwd,
+        shell: true,
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: { ...process.env, CI: '1', NO_COLOR: '1', TERM: 'dumb' },
+      })
       const lines: string[] = []
+      let timedOut = false
+
+      const killTimer = setTimeout(() => {
+        timedOut = true
+        proc.kill('SIGTERM')
+        setTimeout(() => proc.kill('SIGKILL'), 3000)
+      }, timeoutMs)
 
       proc.stdout.on('data', (chunk: Buffer) => {
         for (const line of chunk.toString().split('\n')) {
@@ -143,8 +158,11 @@ export class CLIBridge {
         if (line) onLine('⚠️ ' + line)
       })
 
-      proc.on('close', (code: number | null) => resolve({ exitCode: code ?? 0, stdout: lines.join('\n') }))
-      proc.on('error', reject)
+      proc.on('close', (code: number | null) => {
+        clearTimeout(killTimer)
+        resolve({ exitCode: code ?? 0, stdout: lines.join('\n'), timedOut })
+      })
+      proc.on('error', (err: Error) => { clearTimeout(killTimer); reject(err) })
     })
   }
 }

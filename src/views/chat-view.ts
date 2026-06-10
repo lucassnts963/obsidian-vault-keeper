@@ -224,22 +224,29 @@ export class ChatView extends ItemView {
     this.render()
 
     const outputLines: string[] = []
+    let timedOut = false
 
     try {
       const vaultPath = (this.plugin.app.vault.adapter as any).basePath || '.'
-      await this.cliBridge!.spawn(cmd, vaultPath, (line) => {
+      const result = await this.cliBridge!.spawn(cmd, vaultPath, (line) => {
         const clean = stripAnsi(line)
         if (!clean.trim()) return
         outputLines.push(clean)
         this.messages.push({ role: 'cli-output', content: clean })
         this.render()
       })
+      timedOut = result.timedOut
     } catch (err: any) {
       this.messages.push({ role: 'system', content: `Erro ao executar CLI: ${err.message}` })
     } finally {
       if (this.cliTimer) { clearInterval(this.cliTimer); this.cliTimer = null }
       this.cliRunning = false
-      if (outputLines.length === 0) {
+      if (timedOut) {
+        this.messages.push({
+          role: 'system',
+          content: `⏱️ Timeout (${this.cliElapsed}s): processo encerrado. O CLI pode não suportar modo não-interativo — tente executar o comando manualmente no terminal.`,
+        })
+      } else if (outputLines.length === 0) {
         this.messages.push({
           role: 'system',
           content: `⚠️ CLI concluiu sem produzir saída (${this.cliElapsed}s). Verifique se o comando foi bem-sucedido.`,
