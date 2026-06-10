@@ -72,15 +72,24 @@ export class CLIBridge {
     const pref = this.settings.cli?.preferred
     const instrFile = pref === 'gemini' ? 'GEMINI.md' : pref === 'opencode' ? 'AGENTS.md' : 'CLAUDE.md'
 
+    // Each CLI has its own non-interactive invocation syntax:
+    //   claude  → claude -p "message"
+    //   gemini  → gemini -p "message"
+    //   opencode → opencode run "message"
+    const prompt = (message: string) =>
+      pref === 'opencode'
+        ? `${cli} run "${message}"`
+        : `${cli} -p "${message}"`
+
     switch (task) {
       case 'ingest':
-        return `${cli} -p "Ingira (ingest) o arquivo ${args.file || 'raw/'} seguindo as instruções em ${instrFile}"`
+        return prompt(`Ingira (ingest) o arquivo ${args.file || 'raw/'} seguindo as instruções em ${instrFile}`)
       case 'lint':
-        return `${cli} -p "Execute o fluxo de lint (auditoria) do vault seguindo as instruções em ${instrFile}"`
+        return prompt(`Execute o fluxo de lint (auditoria) do vault seguindo as instruções em ${instrFile}`)
       case 'query':
-        return `${cli} -p "${args.question || 'Responda a consulta sobre o vault'} (veja ${instrFile})"`
+        return prompt(`${args.question || 'Responda a consulta sobre o vault'} (veja ${instrFile})`)
       case 'focus':
-        return `${cli} -p "Atualize _slots/focus.md com: ${args.description || 'tarefa atual'} (veja ${instrFile})"`
+        return prompt(`Atualize _slots/focus.md com: ${args.description || 'tarefa atual'} (veja ${instrFile})`)
     }
   }
 
