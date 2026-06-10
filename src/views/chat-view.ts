@@ -47,6 +47,7 @@ export class ChatView extends ItemView {
   private messages: ChatMessage[] = []
   private cliBridge: CLIBridge | null = null
   private continueSession = false
+  private continueSessionInitialized = false
   private cliRunning = false
   private cliElapsed = 0
   private cliTimer: ReturnType<typeof setInterval> | null = null
@@ -72,6 +73,10 @@ export class ChatView extends ItemView {
   async onOpen() {
     if (this.plugin.settings.cli?.preferred && this.plugin.settings.cli.preferred !== 'none') {
       this.cliBridge = new CLIBridge(this.plugin.settings)
+    }
+    if (!this.continueSessionInitialized) {
+      this.continueSession = this.plugin.settings.cli?.preferred === 'opencode'
+      this.continueSessionInitialized = true
     }
     this.buildLayout()
   }
