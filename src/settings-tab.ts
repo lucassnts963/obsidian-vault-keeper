@@ -72,6 +72,53 @@ export class VaultKeeperSettingTab extends PluginSettingTab {
           await this.plugin.saveSettings()
         }))
 
+    // === CLI ===
+    containerEl.createEl('h3', { text: 'CLI Agent' })
+    new Setting(containerEl)
+      .setName('CLI Agent')
+      .setDesc('Agente CLI a usar (requer instalação). "none" usa o agente LLM interno.')
+      .addDropdown(d => d
+        .addOption('none', 'Nenhum (modo interno)')
+        .addOption('claude', 'Claude Code')
+        .addOption('opencode', 'OpenCode')
+        .addOption('gemini', 'Gemini CLI')
+        .addOption('custom', 'Customizado')
+        .setValue(this.plugin.settings.cli?.preferred || 'none')
+        .onChange(async v => {
+          if (!this.plugin.settings.cli) {
+            this.plugin.settings.cli = { preferred: 'none', customBinaryPath: '', autoDetect: true }
+          }
+          this.plugin.settings.cli.preferred = v as any
+          await this.plugin.saveSettings()
+          this.display()
+        }))
+
+    new Setting(containerEl)
+      .setName('Auto-detectar CLI')
+      .setDesc('Detectar automaticamente CLIs instalados (claude, opencode, gemini)')
+      .addToggle(t => t
+        .setValue(this.plugin.settings.cli?.autoDetect ?? true)
+        .onChange(async v => {
+          if (!this.plugin.settings.cli) {
+            this.plugin.settings.cli = { preferred: 'none', customBinaryPath: '', autoDetect: true }
+          }
+          this.plugin.settings.cli.autoDetect = v
+          await this.plugin.saveSettings()
+        }))
+
+    if (this.plugin.settings.cli?.preferred === 'custom') {
+      new Setting(containerEl)
+        .setName('Caminho do binário')
+        .setDesc('Caminho completo para o executável do agente customizado')
+        .addText(t => t
+          .setPlaceholder('/usr/local/bin/myagent')
+          .setValue(this.plugin.settings.cli?.customBinaryPath || '')
+          .onChange(async v => {
+            this.plugin.settings.cli.customBinaryPath = v
+            await this.plugin.saveSettings()
+          }))
+    }
+
     // === LLM ===
     containerEl.createEl('h3', { text: 'LLM' })
     new Setting(containerEl)
@@ -210,6 +257,73 @@ export class VaultKeeperSettingTab extends PluginSettingTab {
               await this.plugin.saveSettings()
             })
         })
+
+      new Setting(containerEl)
+        .setName('Author Name')
+        .setDesc('Nome nos commits Git')
+        .addText(t => t
+          .setPlaceholder('Seu Nome')
+          .setValue(this.plugin.settings.git.authorName)
+          .onChange(async v => {
+            this.plugin.settings.git.authorName = v
+            await this.plugin.saveSettings()
+          }))
+
+      new Setting(containerEl)
+        .setName('Author Email')
+        .addText(t => t
+          .setPlaceholder('email@exemplo.com')
+          .setValue(this.plugin.settings.git.authorEmail)
+          .onChange(async v => {
+            this.plugin.settings.git.authorEmail = v
+            await this.plugin.saveSettings()
+          }))
+
+      new Setting(containerEl)
+        .setName('Auto-sync (minutos)')
+        .setDesc('0 = desligado. Sincroniza automaticamente a cada N minutos.')
+        .addText(t => {
+          t.inputEl.type = 'number'
+          t.setPlaceholder('0')
+            .setValue(String(this.plugin.settings.git.autoSyncMinutes))
+            .onChange(async v => {
+              this.plugin.settings.git.autoSyncMinutes = Math.max(0, parseInt(v, 10) || 0)
+              await this.plugin.saveSettings()
+            })
+        })
+
+      new Setting(containerEl)
+        .setName('Sincronizar ao Abrir')
+        .setDesc('Pull automático ao abrir o vault')
+        .addToggle(t => t
+          .setValue(this.plugin.settings.git.syncOnOpen)
+          .onChange(async v => {
+            this.plugin.settings.git.syncOnOpen = v
+            await this.plugin.saveSettings()
+          }))
+
+      new Setting(containerEl)
+        .setName('Sincronizar ao Fechar')
+        .setDesc('Push automático ao fechar o vault (best-effort)')
+        .addToggle(t => t
+          .setValue(this.plugin.settings.git.syncOnClose)
+          .onChange(async v => {
+            this.plugin.settings.git.syncOnClose = v
+            await this.plugin.saveSettings()
+          }))
+
+      new Setting(containerEl)
+        .setName('Estratégia de Conflito')
+        .setDesc('O que fazer quando o arquivo foi modificado local e remotamente')
+        .addDropdown(d => d
+          .addOption('ask', 'Backup + sobrescrever (padrão)')
+          .addOption('keep-local', 'Manter versão local')
+          .addOption('keep-remote', 'Usar versão remota')
+          .setValue(this.plugin.settings.git.conflictStrategy)
+          .onChange(async v => {
+            this.plugin.settings.git.conflictStrategy = v as any
+            await this.plugin.saveSettings()
+          }))
     }
   }
 }

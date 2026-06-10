@@ -29,6 +29,8 @@ export class IndexPersistence {
   static readonly indexPath = '.vault-keeper/bm25-index.json'
   static readonly dataDir = '.vault-keeper'
 
+  private writeQueue: Promise<void> = Promise.resolve()
+
   constructor(private readonly adapter: VaultAdapter) {}
 
   async load(): Promise<IndexEntry[]> {
@@ -49,15 +51,21 @@ export class IndexPersistence {
   }
 
   async upsert(entry: IndexEntry): Promise<void> {
-    const entries = await this.load()
-    const idx = entries.findIndex(e => e.path === entry.path)
-    if (idx === -1) entries.push(entry)
-    else entries[idx] = entry
-    await this.save(entries)
+    this.writeQueue = this.writeQueue.then(async () => {
+      const entries = await this.load()
+      const idx = entries.findIndex(e => e.path === entry.path)
+      if (idx === -1) entries.push(entry)
+      else entries[idx] = entry
+      await this.save(entries)
+    })
+    return this.writeQueue
   }
 
   async remove(path: string): Promise<void> {
-    const entries = await this.load()
-    await this.save(entries.filter(e => e.path !== path))
+    this.writeQueue = this.writeQueue.then(async () => {
+      const entries = await this.load()
+      await this.save(entries.filter(e => e.path !== path))
+    })
+    return this.writeQueue
   }
 }

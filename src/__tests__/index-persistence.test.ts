@@ -104,6 +104,19 @@ describe('IndexPersistence', () => {
     await ip.remove('wiki/nonexistent.md')
     expect(await ip.load()).toHaveLength(1)
   })
+
+  it('concurrent upserts do not lose entries (write queue)', async () => {
+    const ip = new IndexPersistence(adapter)
+    const entries = Array.from({ length: 10 }, (_, i) => ({
+      path: `wiki/page-${i}.md`, title: `Page ${i}`, summary: '', tags: [], key_entities: [],
+    }))
+    await Promise.all(entries.map((e: any) => ip.upsert(e)))
+    const loaded = await ip.load()
+    expect(loaded).toHaveLength(10)
+    const paths = loaded.map((e: any) => e.path).sort()
+    expect(paths[0]).toBe('wiki/page-0.md')
+    expect(paths[9]).toBe('wiki/page-9.md')
+  })
 })
 
 // TEST-12

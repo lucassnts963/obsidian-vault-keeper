@@ -60,6 +60,7 @@ export default class VaultKeeperPlugin extends Plugin {
             authorName: this.settings.git.authorName || 'Vault Keeper',
             authorEmail: this.settings.git.authorEmail || 'vault@keeper.local',
             autoSyncMinutes: this.settings.git.autoSyncMinutes,
+            conflictStrategy: this.settings.git.conflictStrategy,
           },
           '.obsidian/vault-keeper',
         )
@@ -75,7 +76,7 @@ export default class VaultKeeperPlugin extends Plugin {
     this.llm = createProvider(this.settings.llm)
 
     this.wiki = new WikiOps(this.app.vault, this.settings)
-    this.logger = new Logger(this.app.vault)
+    this.logger = new Logger(this.app.vault, this.settings.logPath)
 
     this.agent = new VaultAgent(
       this.app.vault, this.llm || {} as any,
@@ -198,7 +199,7 @@ export default class VaultKeeperPlugin extends Plugin {
 
     this.setupAutoSync()
 
-    if (this.github) {
+    if (this.github && this.settings.git.syncOnOpen) {
       setTimeout(() => this.autoPullOnStart(), 2000)
     }
 
@@ -212,10 +213,11 @@ export default class VaultKeeperPlugin extends Plugin {
     if (cli?.preferred && cli.preferred !== 'none') {
       this.cliBridge = new CLIBridge(this.settings)
     } else if (cli?.autoDetect !== false) {
-      CLIBridge.detect().then(detected => {
+      CLIBridge.detect().then(async detected => {
         if (detected) {
           this.settings.cli = { ...this.settings.cli, preferred: detected }
           this.cliBridge = new CLIBridge(this.settings)
+          await this.saveSettings()
         }
       }).catch(() => {})
     }
@@ -486,6 +488,9 @@ export default class VaultKeeperPlugin extends Plugin {
   onunload() {
     if (this.autoSyncInterval) {
       clearInterval(this.autoSyncInterval)
+    }
+    if (this.github && this.settings.git.syncOnClose) {
+      this.doPush().catch(() => {})
     }
   }
 }

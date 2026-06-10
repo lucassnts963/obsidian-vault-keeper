@@ -6,7 +6,7 @@ Delega inteligência a um CLI externo instalado (Claude Code, OpenCode, Gemini C
 
 ## Status
 
-✅ **Funcional** — 209 testes passando, 27 arquivos de teste. Scaffold completo, wizard de onboarding, CLI bridge, BM25 search, monitor automático.
+✅ **Beta funcional** — 221 testes passando, 28 arquivos de teste. Scaffold completo, wizard de onboarding, CLI bridge, BM25 search, monitor automático, build de produção OK (76 KB).
 
 ---
 
@@ -15,15 +15,23 @@ Delega inteligência a um CLI externo instalado (Claude Code, OpenCode, Gemini C
 | Fase | Ícone | O que faz |
 |------|-------|-----------|
 | **Onboarding** | 🚀 | Wizard de primeira execução: "Começar do zero" ou "Migrar vault existente" — cria estrutura, gera CLAUDE.md / GEMINI.md / AGENTS.md automaticamente |
-| **CLI Bridge** | 🤖 | Detecta Claude Code / OpenCode / Gemini CLI instalados. No desktop: spawna e transmite saída linha a linha. No mobile: copia comando para clipboard |
+| **CLI Bridge** | 🤖 | Detecta Claude Code / OpenCode / Gemini CLI instalados. Desktop: spawna e transmite saída linha a linha. Mobile: copia comando para clipboard |
 | **Inbox** | 📥 | Painel com filtro por status. Aprovar/rejeitar com botões |
-| **Approve** | ✅ | Move fonte pra `raw/`, seta `status: raw`, registra no log |
+| **Approve** | ✅ | Move fonte pra `raw/`, seta `status: approved`, registra no log |
 | **Ingest** | 🧠 | LLM/CLI lê a fonte → propõe página wiki com citações + frontmatter rico (`title`, `summary`, `key_entities`, `tags`) |
-| **BM25 Search** | 🔎 | Índice full-text local em `.vault-keeper/bm25-index.json`. Reindexação automática ao salvar arquivos em `wiki/` |
+| **BM25 Search** | 🔎 | Índice full-text local em `.vault-keeper/bm25-index.json`. Reindexação automática (debounced 2s) ao salvar arquivos em `wiki/` |
 | **Query** | 💬 | Chat sobre o vault. BM25 ranqueia contexto → LLM/CLI responde com `[[wiki/links]]` |
-| **Lint** | 🔍 | Auditoria: páginas órfãs, frontmatter faltando, index desatualizado |
+| **Lint** | 🔍 | Auditoria: páginas sem frontmatter, entries faltando no index |
 | **Slots** | 📌 | Estado vivo de sessão em `_slots/` (foco atual, relatório de lint) |
-| **Git Sync** | 🔄 | Push/pull via **isomorphic-git** (JS puro, sem shell). Estratégias de conflito: `ours` / `theirs` / `manual`. Auto-sync ao abrir/fechar vault |
+| **Git Sync** | 🔄 | Push/pull via **GitHub REST API** (fetch puro, funciona no mobile sem shell). Estratégias de conflito: `ask` / `keep-local` / `keep-remote`. Suporte a syncOnOpen/syncOnClose |
+
+---
+
+## Idioma / Language
+
+O plugin entende **português e inglês**. Prompts do agente, instruções de CLI e detecção de intenção no chat aceitam perguntas e comandos em ambos os idiomas.
+
+The plugin understands **Portuguese and English**. Agent prompts, CLI instructions, and chat intent detection accept queries in both languages.
 
 ---
 
@@ -45,7 +53,7 @@ ChatView detecta CLI instalado?
 
 ## LLM — Agnóstico a modelo
 
-O usuário escolhe o provider (interno):
+O usuário escolhe o provider (interno — usado quando não há CLI):
 
 ```
 Provider: [HTTP API] [Ollama (local)]
@@ -64,6 +72,7 @@ Model:    deepseek-chat
 
 ```
 inbox/*.md  ──aprovar──▶  raw/*.md  ──ingest──▶  wiki/*.md
+(status: inbox)        (status: approved)      (status: ingested)
                                                       │
                                               bm25-index.json
                                                       │
@@ -73,7 +82,7 @@ _slots/focus.md  ──▶  contexto de sessão injetado em toda query
 ```
 
 1. Conteúdo chega no `inbox/` (notas do celular, Google Keep, blog posts, etc.)
-2. Você revisa no painel Inbox → aprova (move pra `raw/`) ou rejeita
+2. Você revisa no painel Inbox → aprova (`status: approved`, move pra `raw/`) ou rejeita (`status: rejected`, fica no inbox)
 3. **Ingest**: LLM/CLI lê a fonte, propõe página wiki com citações fiéis (FAITHFULNESS)
 4. Página criada em `wiki/`, `index.md` e `bm25-index.json` atualizados automaticamente
 5. **Query**: pergunta sobre o vault → BM25 ranqueia contexto → LLM/CLI responde com links
@@ -85,7 +94,7 @@ _slots/focus.md  ──▶  contexto de sessão injetado em toda query
 ```
 <vault>/
 ├── inbox/          ← conteúdo novo (status: inbox)
-├── raw/            ← fontes aprovadas (status: raw)
+├── raw/            ← fontes aprovadas (status: approved)
 ├── wiki/           ← páginas de conhecimento
 │   ├── index.md    ← tabela mestre
 │   └── log.md      ← log de atividade
@@ -110,10 +119,10 @@ Copiar `main.js` e `manifest.json` para `.obsidian/plugins/vault-keeper/` no seu
 
 ## Configuração
 
-1. **CLI** (recomendado): instale Claude Code (`npm i -g @anthropic-ai/claude-code`), OpenCode ou Gemini CLI — o plugin detecta automaticamente
+1. **CLI** (recomendado): instale Claude Code (`npm i -g @anthropic-ai/claude-code`), OpenCode ou Gemini CLI — o plugin detecta automaticamente e salva a preferência
 2. **LLM** (fallback): endpoint + modelo + API key
-3. **Git**: remote URL + token GitHub (opcional, para sync)
-4. **Vaults**: paths dos vaults de projeto (para cross-ingest)
+3. **Git Sync**: remote URL + token GitHub. Estratégia de conflito: `ask` (backup + sobrescrever), `keep-local` (não sobrescreve modificações locais), `keep-remote` (sobrescreve sempre)
+4. **Vaults**: paths dos vaults de projeto (reservado para cross-ingest)
 
 Na primeira execução, o **wizard de onboarding** cria a estrutura e gera os arquivos de instrução para o CLI detectado.
 
@@ -125,7 +134,7 @@ Na primeira execução, o **wizard de onboarding** cria a estrutura e gera os ar
 src/
 ├── main.ts              # Entry point — registra views, commands, monitor, onboarding
 ├── settings.ts          # LLMSettings + GitSettings + CLISettings
-├── settings-tab.ts      # Painel de configuração
+├── settings-tab.ts      # Painel de configuração (CLI, LLM, Agent, Git avançado)
 │
 ├── agents/
 │   ├── cli-bridge.ts    # Detecção de CLI, geração de CLAUDE.md/GEMINI.md/AGENTS.md, spawn
@@ -136,42 +145,51 @@ src/
 │   └── templates.ts     # Estrutura padrão de dirs e arquivos seed
 │
 ├── chat/
-│   ├── agent.ts         # VaultAgent: loop de tools
-│   ├── prompts.ts       # System prompts com regras FAITHFULNESS
+│   ├── agent.ts         # VaultAgent: loop de tools com histórico de conversa
+│   ├── prompts.ts       # System prompts bilíngues com regras FAITHFULNESS
 │   └── tools.ts         # bm25_search, read_file, write_page, approve, lint, …
 │
 ├── github/
-│   └── sync.ts          # isomorphic-git: push/pull/status/conflitos
+│   └── sync.ts          # GitHub REST API: push/pull/status/conflitos
 │
 ├── llm/
-│   └── provider.ts      # Factory agnóstica (OpenAI-compatible)
+│   └── provider.ts      # Factory agnóstica (OpenAI-compatible) com null-safety
 │
 ├── search/
 │   ├── bm25.ts          # Okapi BM25
 │   ├── index-builder.ts # WikiSearchIndex
-│   └── index-persistence.ts  # .vault-keeper/bm25-index.json
+│   └── index-persistence.ts  # .vault-keeper/bm25-index.json (com write queue)
 │
 ├── slots/
 │   └── manager.ts       # SlotsManager (_slots/ session state)
 │
 ├── wiki/
 │   ├── ops.ts           # Ingest, approve, reject, gatherContext, writePage
-│   └── log.ts           # Log append-only
+│   └── log.ts           # Log append-only (path configurável)
 │
 └── views/
     ├── onboarding-view.ts  # Wizard primeira execução
     ├── chat-view.ts        # CLI Task Panel + Vault Chat (fallback)
     ├── inbox-view.ts       # Painel inbox com filtros
-    ├── lint-view.ts        # Relatório de auditoria
-    ├── markdown.ts         # Renderer markdown
-    └── ui.ts               # Helpers de UI
+    └── lint-view.ts        # Relatório de auditoria
 ```
 
 ## Stack
 
 - **Obsidian API** — views, commands, ribbon, settings
-- **isomorphic-git** — Git puro em JS (funciona no mobile sem shell)
+- **GitHub REST API** — Git push/pull via fetch puro (funciona no mobile sem shell)
 - **Fetch API** — LLM provider agnóstico (qualquer endpoint `/v1/chat/completions`)
-- **BM25 interno** — full-text search sem dependência extra
-- **esbuild** — bundle rápido
-- **vitest + happy-dom** — 209 testes, TDD obrigatório
+- **BM25 interno** — full-text search sem dependência extra (write queue para upserts concorrentes)
+- **esbuild** — bundle rápido (76 KB produção)
+- **vitest + happy-dom** — 221 testes, TDD obrigatório
+
+---
+
+## Roadmap
+
+| Feature | Descrição |
+|---------|-----------|
+| **Cross-Ingest** | Promover conteúdo entre vaults com links bidirecionais (campo `vaults.projects` já reservado nas settings) |
+| **Rules Engine** | Detecção de padrões repetidos no log → sugerir regra |
+| **Conflict Modal** | UI interativa para `conflictStrategy: 'ask'` (hoje faz backup silencioso + sobrescreve) |
+| **YAML robusto** | Parser baseado no pacote `yaml` já presente no projeto |

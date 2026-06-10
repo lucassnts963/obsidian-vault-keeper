@@ -11,6 +11,7 @@ export class VaultAgent {
   private vault: any
   private llm: LLMProvider
   private indexPath: string
+  private lintPaths: { wikiPath: string; inboxPath: string; rawPath: string }
   private maxIterations: number
   private maxFileChars: number
   private wiki: any
@@ -19,13 +20,18 @@ export class VaultAgent {
 
   constructor(
     vault: any, llm: LLMProvider,
-    settings: { wikiPath: string; indexPath: string },
+    settings: { wikiPath: string; indexPath: string; inboxPath?: string; rawPath?: string },
     wiki?: any,
     maxIterations = 5, maxFileChars = 3000,
   ) {
     this.vault = vault
     this.llm = llm
     this.indexPath = settings.indexPath
+    this.lintPaths = {
+      wikiPath: settings.wikiPath,
+      inboxPath: settings.inboxPath ?? 'inbox',
+      rawPath: settings.rawPath ?? 'raw',
+    }
     this.wiki = wiki
     this.maxIterations = maxIterations
     this.maxFileChars = maxFileChars
@@ -70,6 +76,7 @@ export class VaultAgent {
 
     const messages: Message[] = [
       { role: 'system', content: this.systemPrompt },
+      ...history,
       { role: 'user', content: question },
     ]
 
@@ -92,7 +99,7 @@ export class VaultAgent {
 
       let result: string
       try {
-        result = await executeTool(this.vault, toolCall.tool, toolCall.args, this.indexPath, this.wiki, this.llm, this.maxFileChars)
+        result = await executeTool(this.vault, toolCall.tool, toolCall.args, this.indexPath, this.wiki, this.llm, this.maxFileChars, this.lintPaths)
       } catch (err: any) {
         result = `Tool error: ${err.message}`
       }

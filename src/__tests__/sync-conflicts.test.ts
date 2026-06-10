@@ -108,6 +108,35 @@ describe('push with conflicts', () => {
   })
 })
 
+describe('pull with keep-local strategy', () => {
+  beforeEach(() => { requestUrl.mockReset() })
+
+  it('skips overwriting local file when strategy is keep-local and local was modified', async () => {
+    const v = mockVault()
+    v.files['nota.md'] = 'minha versao local modificada'
+    const localSHA = await hex('versao antiga')
+    const sync = new GitHubSync(v, {
+      enabled: true, remote: 'https://github.com/user/repo', token: 'ghp_test',
+      authorName: 'T', authorEmail: 't@t.com', autoSyncMinutes: 0,
+      conflictStrategy: 'keep-local',
+    }, '/test')
+    const state = { lastRemoteSHA: 'old-remote', files: { 'nota.md': { sha: localSHA, mtime: 100, size: 12 } } }
+    v.files['/test/sync_state.json'] = JSON.stringify(state)
+    v.dirs.push('/test')
+
+    // ref
+    requestUrl.mockResolvedValueOnce({ status: 200, json: { object: { sha: 'newRemoteSHA' } } })
+    // tree
+    requestUrl.mockResolvedValueOnce({ status: 200, json: { tree: [{ path: 'nota.md', type: 'blob', sha: 'new-blob', size: 30 }] } })
+
+    await sync.pull()
+    // local file should be untouched (keep-local)
+    expect(v.files['nota.md']).toBe('minha versao local modificada')
+    // no backup created
+    expect(v.files['nota.md.backup.md']).toBeUndefined()
+  })
+})
+
 describe('pull with backup', () => {
   beforeEach(() => { requestUrl.mockReset() })
 

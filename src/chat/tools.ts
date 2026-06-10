@@ -39,6 +39,7 @@ export async function readIndex(vault: any, indexPath: string, maxChars = MAX_CH
 }
 
 export async function approveFile(vault: any, _args: any, _idx: string, wiki: any): Promise<string> {
+  if (!wiki) return 'Error: wiki ops não disponível'
   try {
     await wiki.approve({ path: _args.path })
     return `Approved: ${_args.path} → moved to raw/`
@@ -46,6 +47,7 @@ export async function approveFile(vault: any, _args: any, _idx: string, wiki: an
 }
 
 export async function rejectFile(vault: any, _args: any, _idx: string, wiki: any): Promise<string> {
+  if (!wiki) return 'Error: wiki ops não disponível'
   try {
     await wiki.reject({ path: _args.path })
     return `Rejected: ${_args.path}`
@@ -53,17 +55,20 @@ export async function rejectFile(vault: any, _args: any, _idx: string, wiki: any
 }
 
 export async function ingestFile(vault: any, _args: any, _idx: string, wiki: any, llm: any): Promise<string> {
+  if (!wiki) return 'Error: wiki ops não disponível'
   try {
     await wiki.ingestFile({ path: _args.path }, llm)
     return `Ingested: ${_args.path} → wiki page created`
   } catch (err: any) { return `Error: ${err.message}` }
 }
 
-export async function runLint(vault: any, _args: any, indexPath: string, _wiki: any): Promise<string> {
+export async function runLint(
+  vault: any, _args: any, indexPath: string, _wiki: any,
+  lintPaths = { wikiPath: 'wiki', inboxPath: 'inbox', rawPath: 'raw' },
+): Promise<string> {
   try {
-    // Simple lint using vault adapter
     const issues: string[] = []
-    const dirs = ['wiki', 'inbox', 'raw']
+    const dirs = [lintPaths.wikiPath, lintPaths.inboxPath, lintPaths.rawPath]
     for (const dir of dirs) {
       try {
         const list = await vault.adapter.list(dir)
@@ -119,6 +124,7 @@ export async function bm25Search(
 }
 
 export async function writePageTool(vault: any, args: any, _idx: string, wiki: any): Promise<string> {
+  if (!wiki) return 'Error: wiki ops não disponível'
   try {
     const path = await wiki.writePage(args.title, args.content, args.tags || [], args.category || 'uncategorized')
     return `Page created: ${path}`
@@ -127,6 +133,7 @@ export async function writePageTool(vault: any, args: any, _idx: string, wiki: a
 
 export async function executeTool(
   vault: any, tool: string, args: any, indexPath: string, wiki?: any, llm?: any, maxFileChars?: number,
+  lintPaths?: { wikiPath: string; inboxPath: string; rawPath: string },
 ): Promise<string> {
   const mc = maxFileChars || MAX_CHARS
   switch (tool) {
@@ -137,7 +144,7 @@ export async function executeTool(
     case 'approve_file': return approveFile(vault, args, indexPath, wiki)
     case 'reject_file': return rejectFile(vault, args, indexPath, wiki)
     case 'ingest_file': return ingestFile(vault, args, indexPath, wiki, llm)
-    case 'run_lint': return runLint(vault, args, indexPath, wiki)
+    case 'run_lint': return runLint(vault, args, indexPath, wiki, lintPaths)
     case 'write_page': return writePageTool(vault, args, indexPath, wiki)
     default: return Promise.resolve(`Unknown tool: ${tool}`)
   }

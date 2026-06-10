@@ -20,11 +20,18 @@ function plugin(enabled = false) {
       git: {
         enabled,
         remote: '',
-        username: '',
         token: '',
         authorName: '',
         authorEmail: '',
         autoSyncMinutes: 0,
+        syncOnOpen: true,
+        syncOnClose: false,
+        conflictStrategy: 'ask' as const,
+      },
+      cli: {
+        preferred: 'none' as const,
+        customBinaryPath: '',
+        autoDetect: true,
       },
       agent: {
         maxIterations: 5,
@@ -106,5 +113,17 @@ describe('VaultKeeperSettingTab', () => {
 
     expect(findSetting('Remote')).toBeDefined()
     expect(findSetting('Token GitHub')).toBeDefined()
+  })
+
+  it('renders CLI section with preferred dropdown', () => {
+    const tab = new VaultKeeperSettingTab({}, plugin())
+    tab.display()
+    expect(findSetting('CLI Agent')).toBeDefined()
+  })
+
+  it('renders git advanced section with syncOnOpen toggle', () => {
+    const tab = new VaultKeeperSettingTab({}, plugin(true))
+    tab.display()
+    expect(findSetting('Sincronizar ao Abrir')).toBeDefined()
   })
 })

@@ -40,7 +40,9 @@ export class VaultIntegrityMonitor {
 
     const timer = setTimeout(() => {
       this.debounceTimers.delete(file.path)
-      this.reindexFile(file).catch(() => {})
+      this.reindexFile(file).catch((err) => {
+        console.error('[vault-keeper] reindex failed:', file.path, err)
+      })
     }, this.debounceMs)
 
     this.debounceTimers.set(file.path, timer)

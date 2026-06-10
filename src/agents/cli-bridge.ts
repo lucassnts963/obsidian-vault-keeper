@@ -38,7 +38,7 @@ export class CLIBridge {
 
   static async detect(): Promise<AgentCLI | null> {
     if (typeof process === 'undefined' || !process.versions) return null
-    let execSync: ((cmd: string, opts: any) => void) | null = null
+    let execSync: ((cmd: string, opts: any) => unknown) | null = null
     try {
       const cp = await import('child_process')
       execSync = cp.execSync

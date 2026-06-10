@@ -11,7 +11,6 @@ export interface LLMSettings {
 export interface GitSettings {
   enabled: boolean
   remote: string           // e.g. https://github.com/user/vault.git
-  username: string
   token: string
   authorName: string
   authorEmail: string
@@ -59,12 +58,11 @@ export const DEFAULT_SETTINGS: VaultKeeperSettings = {
   git: {
     enabled: false,
     remote: '',
-    username: '',
     token: '',
     authorName: '',
     authorEmail: '',
     autoSyncMinutes: 0,
-    syncOnOpen: false,
+    syncOnOpen: true,
     syncOnClose: false,
     conflictStrategy: 'ask',
   },

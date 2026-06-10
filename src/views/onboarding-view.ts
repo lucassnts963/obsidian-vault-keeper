@@ -156,7 +156,7 @@ export class OnboardingView extends ItemView {
       const inboxPath = `inbox/${slug}.md`
       try {
         const raw = await this.plugin.app.vault.adapter.read(inboxPath)
-        const updated = raw.replace(/^status: inbox$/m, 'status: approved')
+        const updated = raw.replace(/^status:\s*inbox\s*$/m, 'status: approved')
         await this.plugin.app.vault.adapter.write(inboxPath, updated)
         count++
       } catch {}

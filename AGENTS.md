@@ -10,9 +10,10 @@
 | Frontend | VANILLA (Obsidian API: ItemView, Setting, Modal, Notice) |
 | Backend | NONE (pure frontend plugin, no server) |
 | Database | NONE (Obsidian Vault API + BM25 JSON index at `.vault-keeper/bm25-index.json`) |
+| Git Sync | GitHub REST API (fetch puro — sem isomorphic-git, sem shell; funciona no mobile) |
 | Auth | NONE (user configures API key / CLI in plugin settings) |
 | Language | TYPESCRIPT |
-| Test suite | vitest — **209 tests, 27 files** |
+| Test suite | vitest — **221 tests, 28 files** |
 
 ---
 
@@ -166,6 +167,7 @@ Obsidian User
 
 ```
 inbox/*.md  ──approve──▶  raw/*.md  ──ingest──▶  wiki/*.md
+(status: inbox)        (status: approved)      (status: ingested)
                                                       │
                                               bm25-index.json
                                                       │
@@ -173,11 +175,11 @@ inbox/*.md  ──approve──▶  raw/*.md  ──ingest──▶  wiki/*.md
 ```
 
 1. **Inbox** — content arrives with `status: inbox` (notes, clips, blog posts)
-2. **Approve** — user moves to `raw/`, sets `status: raw`, activity logged
+2. **Approve** — user moves file to `raw/`, sets `status: approved`, activity logged. Rejected files stay in inbox with `status: rejected`.
 3. **Ingest** — LLM/CLI reads source → produces wiki page with YAML frontmatter (`title`, `summary`, `key_entities`, `tags`) + citations
-4. **Index** — `wiki/index.md` and `bm25-index.json` updated atomically
+4. **Index** — `wiki/index.md` and `bm25-index.json` updated automatically; upserts are serialized via write queue to prevent race conditions
 5. **Query** — BM25 search seeds LLM context → answer with `[[wiki/links]]`
-6. **Lint** — periodic audit: orphaned pages, missing index entries, frontmatter issues
+6. **Lint** — periodic audit: orphaned pages, missing index entries, frontmatter issues (uses configured paths, not hardcoded)
 7. **Slots** — `_slots/focus.md` holds current session context (injected on every query)
 
 ---
@@ -224,18 +226,26 @@ On mobile: command string is **copied to clipboard** with a notice.
 interface CLISettings {
   preferred: 'claude' | 'opencode' | 'gemini' | 'custom' | 'none';
   customBinaryPath: string;
-  autoDetect: boolean;           // default true
+  autoDetect: boolean;           // default true — persisted on first successful detect
 }
 
 interface GitSettings {
-  // …existing fields…
-  syncOnOpen: boolean;           // auto-pull when vault opens
-  syncOnClose: boolean;          // auto-push when vault closes
-  conflictStrategy: 'ours' | 'theirs' | 'manual';
+  enabled: boolean
+  remote: string                 // HTTPS GitHub URL
+  token: string                  // GitHub PAT (ghp_...)
+  authorName: string
+  authorEmail: string
+  autoSyncMinutes: number        // 0 = off
+  syncOnOpen: boolean            // auto-pull on vault open (default true)
+  syncOnClose: boolean           // auto-push on vault close (fire-and-forget)
+  conflictStrategy: 'ask' | 'keep-local' | 'keep-remote'
+  // ask: backup local file + overwrite (default)
+  // keep-local: skip remote changes for locally-modified files
+  // keep-remote: always overwrite local (backup saved as .backup.md)
 }
 ```
 
-Full schema in `src/settings.ts`.
+Full schema in `src/settings.ts`. All fields are exposed in Settings UI.
 
 ---
 
@@ -264,7 +274,7 @@ Full schema in `src/settings.ts`.
 
 ## Testing (TDD Mandatory)
 
-> **IMPORTANT:** Tests are written BEFORE implementation. Current suite: **209 tests / 27 files**.
+> **IMPORTANT:** Tests are written BEFORE implementation. Current suite: **221 tests / 28 files**.
 
 ### Framework
 - **Unit:** vitest + happy-dom
@@ -297,16 +307,18 @@ Spec → Red (write failing test) → Green (implement) → Refactor → Repeat
 ## Key Observations for Agents
 
 1. **CLI Bridge is the primary intelligence layer** — prefer spawning `claude`/`opencode`/`gemini` over calling the internal LLM. The internal agent is a fallback.
-2. **Obsidian API is only available at runtime** — mock `obsidian` module in tests. Never instantiate `App`, `Vault`, `TFile` directly in tests.
-3. **All views must extend ItemView** and implement `getViewType()`, `getDisplayText()`, `onOpen()`, `onClose()`.
-4. **File operations are async** — always await `vault.adapter.read()`, `vault.create()`, etc.
-5. **isomorphic-git works in browser/mobile** — no shell required. Use HTTP transport with token auth.
-6. **LLM provider is a runtime dependency** — plugin works without it (views show "LLM not configured"). Never crash on missing LLM.
+2. **Git sync uses GitHub REST API** — NOT isomorphic-git. Pure fetch, works on mobile without shell. `src/github/sync.ts`.
+3. **Obsidian API is only available at runtime** — mock `obsidian` module in tests. Never instantiate `App`, `Vault`, `TFile` directly in tests.
+4. **All views must extend ItemView** and implement `getViewType()`, `getDisplayText()`, `onOpen()`, `onClose()`.
+5. **File operations are async** — always await `vault.adapter.read()`, `vault.create()`, etc.
+6. **LLM provider is a runtime dependency** — plugin works without it (views show "Nenhuma IA configurada"). Never crash on missing LLM — `provider.ts` already returns null on missing config.
 7. **BM25 index is the retrieval layer** — always use `bm25_search` before `read_file` for topic queries.
 8. **_slots/ is the session context** — inject `_slots/focus.md` at the start of every agent turn.
-9. **All changes go through `.specs/`** — write spec first, implement second.
-10. **TDD is mandatory** — write tests BEFORE implementation.
-11. **Every view command must be accessible via both ribbon icon and command palette.**
+9. **IndexPersistence uses a write queue** — all `upsert`/`remove` calls are serialized. Don't bypass this by calling `load()` + `save()` directly in concurrent code.
+10. **runLint respects configured paths** — `executeTool` accepts `lintPaths` param. Pass `{ wikiPath, inboxPath, rawPath }` from settings; don't rely on defaults.
+11. **All changes go through `.specs/`** — write spec first, implement second.
+12. **TDD is mandatory** — write tests BEFORE implementation.
+13. **Every view command must be accessible via both ribbon icon and command palette.**
 
 ---
 
