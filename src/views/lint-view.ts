@@ -45,7 +45,13 @@ export class LintView extends ItemView {
       return issues
     }
 
-    const mdFiles = list.files.filter((f: string) => f.endsWith('.md'))
+    const mdFiles = list.files.filter((f: string) => {
+      if (!f.endsWith('.md')) return false
+      // Exclude system files — they are not regular wiki pages
+      const indexFile = (this.plugin.settings.indexPath ?? 'wiki/index.md').split('/').pop()
+      const logFile = (this.plugin.settings.logPath ?? 'wiki/log.md').split('/').pop()
+      return f !== indexFile && f !== logFile
+    })
     if (mdFiles.length === 0) return issues
 
     const pageContents: Record<string, string> = {}

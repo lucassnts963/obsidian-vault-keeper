@@ -68,12 +68,17 @@ export async function runLint(
 ): Promise<string> {
   try {
     const issues: string[] = []
+    // System files in wikiPath that are not regular pages
+    const indexFile = indexPath.split('/').pop() ?? 'index.md'
+    const systemFiles = new Set([indexFile, 'index.md', 'log.md'])
+
     const dirs = [lintPaths.wikiPath, lintPaths.inboxPath, lintPaths.rawPath]
     for (const dir of dirs) {
       try {
         const list = await vault.adapter.list(dir)
         for (const f of list.files) {
           if (!f.endsWith('.md')) continue
+          if (dir === lintPaths.wikiPath && systemFiles.has(f)) continue
           try {
             const c = await vault.adapter.read(`${dir}/${f}`)
             if (!c.startsWith('---')) issues.push(`${dir}/${f}: missing frontmatter`)
