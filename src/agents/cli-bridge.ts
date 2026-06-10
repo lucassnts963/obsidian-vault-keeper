@@ -40,8 +40,7 @@ export class CLIBridge {
     if (typeof process === 'undefined' || !process.versions) return null
     let execSync: ((cmd: string, opts: any) => unknown) | null = null
     try {
-      const cp = await import('child_process')
-      execSync = cp.execSync
+      execSync = require('child_process').execSync
     } catch {
       return null
     }
@@ -108,7 +107,7 @@ export class CLIBridge {
       throw new Error('spawn() only available on desktop (Electron)')
     }
 
-    const { spawn } = await import('child_process')
+    const { spawn } = require('child_process')
 
     return new Promise((resolve, reject) => {
       const proc = spawn(command, { cwd, shell: true })
