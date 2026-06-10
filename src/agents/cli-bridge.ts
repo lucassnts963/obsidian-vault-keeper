@@ -150,11 +150,12 @@ export class CLIBridge {
       const lines: string[] = []
       let timedOut = false
 
-      const killTimer = setTimeout(() => {
+      // timeoutMs === 0 means no timeout (e.g. opencode which may run long)
+      const killTimer = timeoutMs > 0 ? setTimeout(() => {
         timedOut = true
         proc.kill('SIGTERM')
         setTimeout(() => proc.kill('SIGKILL'), 3000)
-      }, timeoutMs)
+      }, timeoutMs) : null
 
       proc.stdout.on('data', (chunk: Buffer) => {
         for (const line of chunk.toString().split('\n')) {
@@ -173,10 +174,10 @@ export class CLIBridge {
       })
 
       proc.on('close', (code: number | null) => {
-        clearTimeout(killTimer)
+        if (killTimer) clearTimeout(killTimer)
         resolve({ exitCode: code ?? 0, stdout: lines.join('\n'), timedOut })
       })
-      proc.on('error', (err: Error) => { clearTimeout(killTimer); reject(err) })
+      proc.on('error', (err: Error) => { if (killTimer) clearTimeout(killTimer); reject(err) })
     })
   }
 }

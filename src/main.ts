@@ -95,16 +95,19 @@ export default class VaultKeeperPlugin extends Plugin {
     this.addCommand({
       id: 'open-inbox',
       name: 'Abrir inbox',
+      hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'B' }],
       callback: () => this.activateView(INBOX_VIEW_TYPE),
     })
     this.addCommand({
       id: 'open-chat',
       name: 'Vault Chat',
+      hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'C' }],
       callback: () => this.activateView(CHAT_VIEW_TYPE),
     })
     this.addCommand({
       id: 'open-lint',
       name: 'Auditoria (lint)',
+      hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'L' }],
       callback: () => this.activateView(LINT_VIEW_TYPE),
     })
     this.addCommand({
@@ -128,11 +131,13 @@ export default class VaultKeeperPlugin extends Plugin {
     this.addCommand({
       id: 'git-push-current',
       name: 'Push: arquivo atual',
+      hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'F' }],
       callback: () => this.doPushCurrent(),
     })
     this.addCommand({
       id: 'git-status',
       name: 'Status do sync',
+      hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'T' }],
       callback: () => this.showStatus(),
     })
     this.addCommand({
@@ -153,11 +158,13 @@ export default class VaultKeeperPlugin extends Plugin {
     this.addCommand({
       id: 'ingest-current',
       name: 'Ingest: arquivo atual',
+      hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'I' }],
       callback: () => this.wiki.ingestFile(this.app.workspace.getActiveFile(), this.llm),
     })
     this.addCommand({
       id: 'approve-current',
-      name: 'Approvar: arquivo atual',
+      name: 'Aprovar: arquivo atual',
+      hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'A' }],
       callback: async () => {
         const file = this.app.workspace.getActiveFile()
         if (!file) { new Notice('Nenhum arquivo aberto'); return }
@@ -168,6 +175,7 @@ export default class VaultKeeperPlugin extends Plugin {
     this.addCommand({
       id: 'reject-current',
       name: 'Rejeitar: arquivo atual',
+      hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'X' }],
       callback: async () => {
         const file = this.app.workspace.getActiveFile()
         if (!file) { new Notice('Nenhum arquivo aberto'); return }
@@ -178,6 +186,7 @@ export default class VaultKeeperPlugin extends Plugin {
     this.addCommand({
       id: 'write-page',
       name: 'Criar página wiki',
+      hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'N' }],
       callback: async () => {
         const title = 'Nova Página'
         const content = ''
