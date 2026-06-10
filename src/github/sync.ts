@@ -214,26 +214,27 @@ export class GitHubSync {
     await this.vault.adapter.write(this.backupPath, '')
   }
 
-  private async* walkFiles(dir: string): AsyncGenerator<string> {
-    const list = await this.vault.adapter.list(dir)
+  private async* walkFiles(dir = ''): AsyncGenerator<string> {
+    let list: { files: string[]; folders: string[] }
+    try {
+      list = await this.vault.adapter.list(dir || '/')
+    } catch {
+      return
+    }
     for (const file of list.files) {
-      if (file.endsWith('.md') && !file.startsWith('.')) {
-        const full = dir === '/' ? file : `${dir}/${file}`
-        yield full.startsWith('/') ? full.slice(1) : full
-      }
+      if (!file.endsWith('.md') || file.startsWith('.')) continue
+      yield dir ? `${dir}/${file}` : file
     }
     for (const sub of list.folders) {
-      if (!sub.startsWith('.')) {
-        const full = dir === '/' ? `/${sub}` : `${dir}/${sub}`
-        yield* this.walkFiles(full)
-      }
+      if (sub.startsWith('.')) continue
+      yield* this.walkFiles(dir ? `${dir}/${sub}` : sub)
     }
   }
 
   async status(): Promise<{ localChanges: string[]; remoteAhead: boolean; branch: string }> {
     await this.loadState()
     const localChanges: string[] = []
-    for await (const f of this.walkFiles('/')) {
+    for await (const f of this.walkFiles()) {
       const cached = this.state.files[f]
       let stat: { mtime: number; size: number } | null = null
       try { stat = await this.vault.adapter.stat(f) } catch { continue }
@@ -303,7 +304,7 @@ export class GitHubSync {
     const changed: { path: string; hash: string; size: number }[] = []
     const deleted: string[] = []
     const skipped: string[] = []
-    for await (const f of this.walkFiles('/')) {
+    for await (const f of this.walkFiles()) {
       const stat = await this.vault.adapter.stat(f)
       if (!stat) continue
       if (stat.size > MAX_FILE_SIZE) { skipped.push(f); continue }
