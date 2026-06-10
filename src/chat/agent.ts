@@ -1,7 +1,6 @@
 import { buildSystemPrompt } from './prompts'
 import { executeTool } from './tools'
 import type { LLMProvider, Message } from '../llm/provider'
-import type { SearchEngine } from '../search/index'
 
 interface ToolCall { type: 'tool'; tool: string; args: any }
 interface AnswerCall { type: 'answer'; content: string }
@@ -12,29 +11,30 @@ export class VaultAgent {
   private vault: any
   private llm: LLMProvider
   private indexPath: string
-  private wikiPath: string
+  private lintPaths: { wikiPath: string; inboxPath: string; rawPath: string }
   private maxIterations: number
   private maxFileChars: number
   private wiki: any
-  private searchEngine?: SearchEngine
   systemPrompt = ''
   private configLoaded = false
 
   constructor(
     vault: any, llm: LLMProvider,
-    settings: { wikiPath: string; indexPath: string },
+    settings: { wikiPath: string; indexPath: string; inboxPath?: string; rawPath?: string },
     wiki?: any,
     maxIterations = 5, maxFileChars = 3000,
-    searchEngine?: SearchEngine,
   ) {
     this.vault = vault
     this.llm = llm
     this.indexPath = settings.indexPath
-    this.wikiPath = settings.wikiPath
+    this.lintPaths = {
+      wikiPath: settings.wikiPath,
+      inboxPath: settings.inboxPath ?? 'inbox',
+      rawPath: settings.rawPath ?? 'raw',
+    }
     this.wiki = wiki
     this.maxIterations = maxIterations
     this.maxFileChars = maxFileChars
-    this.searchEngine = searchEngine
   }
 
   async ensureConfig(): Promise<void> {
@@ -76,6 +76,7 @@ export class VaultAgent {
 
     const messages: Message[] = [
       { role: 'system', content: this.systemPrompt },
+      ...history,
       { role: 'user', content: question },
     ]
 
@@ -92,13 +93,13 @@ export class VaultAgent {
 
       const toolCall = parsed as ToolCall
       if (readFiles.has(toolCall.tool + ':' + JSON.stringify(toolCall.args))) {
-        messages.push({ role: 'user', content: `Already read. Try another path or answer.` })
+        messages.push({ role: 'user', content: `Já lido. Tente outro caminho ou responda. / Already read. Try another path or answer.` })
         continue
       }
 
       let result: string
       try {
-        result = await executeTool(this.vault, toolCall.tool, toolCall.args, this.indexPath, this.wiki, this.llm, this.maxFileChars, this.searchEngine)
+        result = await executeTool(this.vault, toolCall.tool, toolCall.args, this.indexPath, this.wiki, this.llm, this.maxFileChars, this.lintPaths)
       } catch (err: any) {
         result = `Tool error: ${err.message}`
       }
@@ -113,7 +114,7 @@ export class VaultAgent {
 
     const finalMessages: Message[] = [
       { role: 'system', content: this.systemPrompt },
-      { role: 'user', content: 'You reached the maximum number of tool calls. Please answer the original question now based on the context gathered. Original question: ' + question },
+      { role: 'user', content: 'Você atingiu o máximo de chamadas. Responda a pergunta original com o contexto coletado. / You reached the maximum number of tool calls. Answer based on context gathered. Original question: ' + question },
     ]
     const finalResp = await this.llm.chat(finalMessages, { temperature: 0.3 })
     return { steps, answer: finalResp }

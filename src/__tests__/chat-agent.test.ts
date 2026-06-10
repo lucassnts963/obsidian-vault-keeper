@@ -94,6 +94,28 @@ describe('VaultAgent', () => {
     expect(response.steps[0].tool).toBe('read_file')
   })
 
+  it('includes history messages between system prompt and current question', async () => {
+    const v = mockVault()
+    const llm = mockLLM(['{"type":"answer","content":"resposta com histórico"}'])
+    const agent = new VaultAgent(v as any, llm, { wikiPath: 'wiki', indexPath: 'wiki/index.md' })
+    await agent.ensureConfig()
+
+    const history = [
+      { role: 'user' as const, content: 'pergunta anterior' },
+      { role: 'assistant' as const, content: 'resposta anterior' },
+    ]
+    await agent.run('nova pergunta', history)
+
+    const callMessages: any[] = (llm.chat.mock.calls as any[][])[0]?.[0] ?? []
+    const roles = callMessages.map((m: any) => m.role)
+    const systemIdx = roles.indexOf('system')
+    const historyIdx = callMessages.findIndex((m: any) => m.content === 'pergunta anterior')
+    const questionIdx = callMessages.findIndex((m: any) => m.content === 'nova pergunta')
+
+    expect(systemIdx).toBeLessThan(historyIdx)
+    expect(historyIdx).toBeLessThan(questionIdx)
+  })
+
   it('stops at max iterations and makes final call', async () => {
     const v = mockVault()
     const llm = mockLLM([

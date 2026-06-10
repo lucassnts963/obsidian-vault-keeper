@@ -52,14 +52,15 @@ describe('ChatView', () => {
     expect(html).toContain('Enviar')
   })
 
-  it('shows "LLM nao configurado" when llm is null', async () => {
+  it('shows unconfigured message when llm is null and no cli configured', async () => {
     const plugin = mockPlugin()
     plugin.llm = null as any
     const view = new ChatView({}, plugin)
     await view.onOpen()
 
     const html = view.contentEl.innerHTML
-    expect(html).toContain('configurado')
+    // "configurado" appears in both old "LLM não configurado" and new "Nenhuma IA configurada" messages
+    expect(html.toLowerCase()).toMatch(/configur/)
   })
 
   it('send() renders error message when agent.run() rejects', async () => {

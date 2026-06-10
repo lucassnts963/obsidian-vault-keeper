@@ -108,11 +108,11 @@ export class WikiSearchIndex {
   }
 
   query(question: string, topK = 5): WikiQueryHit[] {
-    return this.bm25.search(question, topK).map(r => ({
-      path: r.id,
-      score: r.score,
-      doc: this.docs.get(r.id)!,
-    }))
+    return this.bm25.search(question, topK).flatMap(r => {
+      const doc = this.docs.get(r.id)
+      if (!doc) return []
+      return [{ path: r.id, score: r.score, doc }]
+    })
   }
 
   get size(): number {

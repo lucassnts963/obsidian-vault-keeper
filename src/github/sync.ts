@@ -8,6 +8,7 @@ export interface SyncSettings {
   authorName: string
   authorEmail: string
   autoSyncMinutes: number
+  conflictStrategy?: 'ask' | 'keep-local' | 'keep-remote'
 }
 
 export interface FileEntry {
@@ -389,12 +390,17 @@ export class GitHubSync {
       if (cached && cached.sha === f.sha) continue
       if (f.size && f.size > MAX_FILE_SIZE) { log(`pulado ${f.path} (>1MB)`); skipped++; continue }
       try {
-        // Backup local version if it was modified since last sync
+        // Handle local modifications based on conflictStrategy
         if (cached) {
           try {
             const localBuf = await this.vault.adapter.readBinary(f.path)
             const localHash = await sha256(localBuf)
             if (localHash !== cached.sha) {
+              const strategy = this.settings.conflictStrategy ?? 'ask'
+              if (strategy === 'keep-local') {
+                skipped++
+                continue
+              }
               const localContent = new TextDecoder('utf-8').decode(localBuf)
               await this.vault.adapter.write(`${f.path}.backup.md`, localContent)
               backups++

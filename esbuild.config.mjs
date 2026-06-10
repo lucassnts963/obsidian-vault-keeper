@@ -1,5 +1,6 @@
 import esbuild from 'esbuild'
 import process from 'process'
+import builtins from 'builtin-modules'
 
 const prod = process.argv[2] === 'production'
 
@@ -9,6 +10,7 @@ await esbuild.build({
   external: [
     'obsidian',
     'electron',
+    ...builtins,
     '@codemirror/autocomplete',
     '@codemirror/collab',
     '@codemirror/commands',
