@@ -120,7 +120,8 @@ export class CLIBridge {
   async spawn(
     command: string,
     cwd: string,
-    onLine: (line: string) => void,
+    onStdout: (line: string) => void,
+    onStderr?: (line: string) => void,
     timeoutMs = 300_000,
   ): Promise<{ exitCode: number; stdout: string; timedOut: boolean }> {
     if (!CLIBridge.isDesktop()) {
@@ -149,13 +150,18 @@ export class CLIBridge {
 
       proc.stdout.on('data', (chunk: Buffer) => {
         for (const line of chunk.toString().split('\n')) {
-          if (line.trim()) { lines.push(line); onLine(line) }
+          if (line.trim()) { lines.push(line); onStdout(line) }
         }
       })
 
       proc.stderr.on('data', (chunk: Buffer) => {
-        const line = chunk.toString().trim()
-        if (line) onLine('⚠️ ' + line)
+        for (const line of chunk.toString().split('\n')) {
+          const trimmed = line.trim()
+          if (trimmed) {
+            if (onStderr) onStderr(trimmed)
+            else onStdout('⚠️ ' + trimmed)
+          }
+        }
       })
 
       proc.on('close', (code: number | null) => {

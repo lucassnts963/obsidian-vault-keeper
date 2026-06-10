@@ -35,7 +35,7 @@ export function extractAnswerContent(text: string): string | null {
 
 export const CHAT_VIEW_TYPE = 'vault-keeper-chat'
 
-type MessageRole = 'user' | 'agent' | 'system' | 'cli-output'
+type MessageRole = 'user' | 'agent' | 'system' | 'cli-output' | 'cli-steps' | 'cli-answer'
 interface ChatMessage {
   role: MessageRole
   content: string
@@ -50,6 +50,7 @@ export class ChatView extends ItemView {
   private cliRunning = false
   private cliElapsed = 0
   private cliTimer: ReturnType<typeof setInterval> | null = null
+  private stepsOpen: Set<number> = new Set()
 
   constructor(leaf: WorkspaceLeaf, plugin: VaultKeeperPlugin) {
     super(leaf)
@@ -140,9 +141,7 @@ export class ChatView extends ItemView {
       }
     }
 
-    for (const msg of this.messages) {
-      this.renderMessage(chatArea, msg)
-    }
+    this.messages.forEach((msg, idx) => this.renderMessage(chatArea, msg, idx))
 
     if (this.cliRunning) {
       const dots = '.'.repeat((this.cliElapsed % 3) + 1).padEnd(3, ' ')
@@ -215,41 +214,65 @@ export class ChatView extends ItemView {
     }
 
     this.messages.push({ role: 'system', content: `▶ ${cmd}` })
+
+    // Reserve slots for steps (collapsible) and answer (markdown) — updated in place
+    const stepsIdx = this.messages.length
+    this.messages.push({ role: 'cli-steps', content: '' })
+    this.stepsOpen.add(stepsIdx) // auto-open while running
+
+    const answerIdx = this.messages.length
+    this.messages.push({ role: 'cli-answer', content: '' })
+
     this.cliRunning = true
     this.cliElapsed = 0
-    this.cliTimer = setInterval(() => {
-      this.cliElapsed++
-      this.render()
-    }, 1000)
+    this.cliTimer = setInterval(() => { this.cliElapsed++; this.render() }, 1000)
     this.render()
 
-    const outputLines: string[] = []
+    const stepLines: string[] = []
+    const outLines: string[] = []
     let timedOut = false
 
     try {
       const vaultPath = (this.plugin.app.vault.adapter as any).basePath || '.'
-      const result = await this.cliBridge!.spawn(cmd, vaultPath, (line) => {
-        const clean = stripAnsi(line)
-        if (!clean.trim()) return
-        outputLines.push(clean)
-        this.messages.push({ role: 'cli-output', content: clean })
-        this.render()
-      })
+      const result = await this.cliBridge!.spawn(
+        cmd,
+        vaultPath,
+        (line) => {
+          const clean = stripAnsi(line)
+          if (!clean.trim()) return
+          outLines.push(clean)
+          this.messages[answerIdx] = { role: 'cli-answer', content: outLines.join('\n') }
+          this.render()
+        },
+        (line) => {
+          const clean = stripAnsi(line)
+          if (!clean.trim()) return
+          stepLines.push(clean)
+          this.messages[stepsIdx] = { role: 'cli-steps', content: stepLines.join('\n') }
+          this.render()
+        },
+      )
       timedOut = result.timedOut
     } catch (err: any) {
       this.messages.push({ role: 'system', content: `Erro ao executar CLI: ${err.message}` })
     } finally {
       if (this.cliTimer) { clearInterval(this.cliTimer); this.cliTimer = null }
       this.cliRunning = false
+
+      // Remove empty placeholder messages
+      if (!stepLines.length) this.messages.splice(stepsIdx, 1)
+      const finalAnswerIdx = this.messages.findIndex(m => m.role === 'cli-answer' && !m.content)
+      if (finalAnswerIdx !== -1) this.messages.splice(finalAnswerIdx, 1)
+
       if (timedOut) {
         this.messages.push({
           role: 'system',
-          content: `⏱️ Timeout (${this.cliElapsed}s): processo encerrado. O CLI pode não suportar modo não-interativo — tente executar o comando manualmente no terminal.`,
+          content: `⏱️ Timeout (${this.cliElapsed}s): processo encerrado. O CLI pode não suportar modo não-interativo.`,
         })
-      } else if (outputLines.length === 0) {
+      } else if (!outLines.length && !stepLines.length) {
         this.messages.push({
           role: 'system',
-          content: `⚠️ CLI concluiu sem produzir saída (${this.cliElapsed}s). Verifique se o comando foi bem-sucedido.`,
+          content: `⚠️ CLI concluiu sem produzir saída (${this.cliElapsed}s).`,
         })
       } else {
         this.messages.push({ role: 'system', content: `✅ Concluído (${this.cliElapsed}s)` })
@@ -310,7 +333,7 @@ export class ChatView extends ItemView {
     }
   }
 
-  private renderMessage(container: HTMLElement, msg: ChatMessage) {
+  private renderMessage(container: HTMLElement, msg: ChatMessage, msgIndex = -1) {
     if (msg.toolResults && msg.toolResults.length > 0) {
       for (const tc of msg.toolResults) {
         const argStr = Object.entries(tc.args)
@@ -318,6 +341,55 @@ export class ChatView extends ItemView {
           .filter(Boolean).join(', ')
         collapsible(`${tc.tool}(${argStr})`, tc.result, container)
       }
+    }
+
+    // Processing steps — collapsible <details> block
+    if (msg.role === 'cli-steps') {
+      if (!msg.content.trim()) return
+      const lines = msg.content.split('\n').filter(Boolean)
+      const details = container.createEl('details')
+      if (this.stepsOpen.has(msgIndex)) details.setAttribute('open', '')
+      details.style.margin = '4px 0'
+
+      const summary = details.createEl('summary')
+      summary.style.cursor = 'pointer'
+      summary.style.fontSize = '11px'
+      summary.style.color = 'var(--text-muted)'
+      summary.style.padding = '2px 4px'
+      summary.style.userSelect = 'none'
+      summary.textContent = `${lines.length} etapa${lines.length !== 1 ? 's' : ''} de processamento`
+
+      const pre = details.createEl('pre')
+      pre.style.fontSize = '11px'
+      pre.style.color = 'var(--text-muted)'
+      pre.style.margin = '4px 0 0'
+      pre.style.padding = '6px 8px'
+      pre.style.background = 'var(--background-secondary)'
+      pre.style.borderRadius = '4px'
+      pre.style.maxHeight = '180px'
+      pre.style.overflowY = 'auto'
+      pre.style.whiteSpace = 'pre-wrap'
+      pre.textContent = lines.join('\n')
+
+      details.addEventListener('toggle', () => {
+        if (details.open) this.stepsOpen.add(msgIndex)
+        else this.stepsOpen.delete(msgIndex)
+      })
+      return
+    }
+
+    // Final CLI answer — rendered as markdown in an agent bubble
+    if (msg.role === 'cli-answer') {
+      if (!msg.content.trim()) return
+      const b = bubble('agent', container)
+      b.body.innerHTML = renderMarkdown(msg.content)
+      b.body.querySelectorAll('.vk-wikilink').forEach((el: any) => {
+        el.addEventListener('click', () => {
+          const path = el.getAttribute('data-path')
+          if (path) this.plugin.app.workspace.openLinkText(path, '', true)
+        })
+      })
+      return
     }
 
     if (msg.role === 'cli-output') {
