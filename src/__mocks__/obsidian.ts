@@ -80,5 +80,25 @@ export class WorkspaceLeaf {}
 export const addIcon = () => {}
 export const setIcon = () => {}
 
+export const Platform = {
+  isDesktopApp: false,
+  isMobileApp: false,
+  isAndroidApp: false,
+  isIosApp: false,
+}
+
+export class Modal {
+  app: any
+  contentEl: any
+  constructor(app: any) {
+    this.app = app
+    this.contentEl = makeContainer()
+  }
+  open() {}
+  close() {}
+  onOpen() {}
+  onClose() {}
+}
+
 export let settingStore: any[] = []
 export function resetSettingStore() { settingStore = [] }

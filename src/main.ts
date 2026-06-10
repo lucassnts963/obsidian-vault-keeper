@@ -15,6 +15,7 @@ import { VaultInstaller } from './scaffold/installer'
 import { CLIBridge } from './agents/cli-bridge'
 import { VaultIntegrityMonitor } from './agents/monitor'
 import { IndexPersistence } from './search/index-persistence'
+import { DiagnosticsModal } from './diagnostics/modal'
 
 const SYNC_ICON =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>'
@@ -193,6 +194,11 @@ export default class VaultKeeperPlugin extends Plugin {
         await this.wiki.writePage(title, content, [], 'uncategorized')
         new Notice(`Página criada: ${title}`)
       },
+    })
+    this.addCommand({
+      id: 'run-diagnostics',
+      name: 'Diagnóstico (sync + adapter)',
+      callback: () => new DiagnosticsModal(this.app, this.settings, this.app.vault).open(),
     })
 
     this.addRibbonIcon('inbox', 'Vault Keeper: Inbox', () => this.activateView(INBOX_VIEW_TYPE))
