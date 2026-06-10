@@ -1,6 +1,6 @@
 {
   "name": "obsidian-vault-keeper",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Metodologia completa de gestão de conhecimento com LLM — inbox, ingest, query, lint, cross-ingest, GitHub sync",
   "main": "main.js",
   "scripts": {
