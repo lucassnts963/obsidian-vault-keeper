@@ -382,13 +382,13 @@ export default class VaultKeeperPlugin extends Plugin {
         new Notice(`⚠️ Push falhou: ${err.message?.slice(0, 100)}`, 5000)
       }
 
-      const pullMsgs = await this.github!.pull((phase) => {
+      const pullMsgs = pushFailed ? [] : await this.github!.pull((phase) => {
         notice.setMessage(`🔄 ${phase}`)
       })
       notice.hide()
 
       const allMsgs = [
-        pushFailed ? '⚠️ Sync (push falhou)' : '✅ Sync concluído',
+        pushFailed ? '⚠️ Sync abortado: push falhou, pull ignorado' : '✅ Sync concluído',
         ...pushMsgs.map((m: string) => `   ${m}`),
         ...pullMsgs.map((m: string) => `   ${m}`),
       ]

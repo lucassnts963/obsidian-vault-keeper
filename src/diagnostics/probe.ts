@@ -127,16 +127,20 @@ export async function runDiagnostics(vault: Vault, settings: VaultKeeperSettings
     const walk = async (dir = ''): Promise<void> => {
       let list: any
       try { list = await adapter.list(dir || '') } catch { errors++; return }
+      const strip = (name: string) =>
+        dir && name.startsWith(dir + '/') ? name.slice(dir.length + 1) : name
       for (const f of list.files) {
-        if (!f.endsWith('.md') || f.startsWith('.')) continue
-        const path = dir ? `${dir}/${f}` : f
+        const base = strip(f)
+        if (!base.endsWith('.md') || base.startsWith('.')) continue
+        const path = dir ? `${dir}/${base}` : base
         try {
           const stat = await adapter.stat(path)
           if (stat) changed++
         } catch { errors++ }
       }
       for (const sub of list.folders) {
-        if (!sub.startsWith('.')) await walk(dir ? `${dir}/${sub}` : sub)
+        const base = strip(sub)
+        if (!base.startsWith('.') && base !== '') await walk(dir ? `${dir}/${base}` : base)
       }
     }
     await walk()

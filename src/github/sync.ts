@@ -217,17 +217,24 @@ export class GitHubSync {
   private async* walkFiles(dir = ''): AsyncGenerator<string> {
     let list: { files: string[]; folders: string[] }
     try {
-      list = await this.vault.adapter.list(dir || '/')
+      list = await this.vault.adapter.list(dir || '')
     } catch {
       return
     }
+    // CapacitorAdapter (Android) returns full vault-root-relative paths;
+    // FileSystemAdapter (desktop) returns basenames. Normalize to basename.
+    const strip = (name: string) =>
+      dir && name.startsWith(dir + '/') ? name.slice(dir.length + 1) : name
+
     for (const file of list.files) {
-      if (!file.endsWith('.md') || file.startsWith('.')) continue
-      yield dir ? `${dir}/${file}` : file
+      const base = strip(file)
+      if (!base.endsWith('.md') || base.startsWith('.')) continue
+      yield dir ? `${dir}/${base}` : base
     }
     for (const sub of list.folders) {
-      if (sub.startsWith('.')) continue
-      yield* this.walkFiles(dir ? `${dir}/${sub}` : sub)
+      const base = strip(sub)
+      if (base.startsWith('.') || base === '') continue
+      yield* this.walkFiles(dir ? `${dir}/${base}` : base)
     }
   }
 
@@ -305,7 +312,8 @@ export class GitHubSync {
     const deleted: string[] = []
     const skipped: string[] = []
     for await (const f of this.walkFiles()) {
-      const stat = await this.vault.adapter.stat(f)
+      let stat: { mtime: number; size: number } | null = null
+      try { stat = await this.vault.adapter.stat(f) } catch { continue }
       if (!stat) continue
       if (stat.size > MAX_FILE_SIZE) { skipped.push(f); continue }
       const cached = this.state.files[f]

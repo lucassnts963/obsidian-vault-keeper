@@ -486,6 +486,70 @@ describe('GitHubSync', () => {
     })
   })
 
+  describe('Android CapacitorAdapter — full-path normalization', () => {
+    function makeSync(adapter: any) {
+      return new GitHubSync(
+        { adapter },
+        { remote: 'https://github.com/user/repo', token: 'ghp_test', authorName: 'Test', authorEmail: 'test@test.com', enabled: true, autoSyncMinutes: 0 },
+        '/test',
+      )
+    }
+
+    it('T-Android-01: walkFiles normalizes full-path entries from CapacitorAdapter', async () => {
+      const adapter = {
+        read: vi.fn().mockRejectedValue(new Error('not found')),
+        write: vi.fn().mockResolvedValue(undefined),
+        readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
+        exists: vi.fn().mockResolvedValue(false),
+        stat: vi.fn().mockResolvedValue({ mtime: 0, size: 10 }),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn()
+          .mockResolvedValueOnce({ files: [], folders: ['wiki'] })         // root
+          .mockResolvedValueOnce({ files: ['wiki/a.md', 'wiki/b.md'], folders: [] }), // wiki
+      }
+      const sync = makeSync(adapter)
+      const paths: string[] = []
+      for await (const p of (sync as any).walkFiles()) paths.push(p)
+      expect(paths).toEqual(['wiki/a.md', 'wiki/b.md'])
+      expect(paths).not.toContain('wiki/wiki/a.md')
+    })
+
+    it('T-Android-02: push completes without throwing with Android-style adapter', async () => {
+      const adapter = {
+        read: vi.fn().mockRejectedValue(new Error('not found')),
+        write: vi.fn().mockResolvedValue(undefined),
+        readBinary: vi.fn().mockResolvedValue(new TextEncoder().encode('content').buffer),
+        exists: vi.fn().mockResolvedValue(false),
+        stat: vi.fn().mockResolvedValue({ mtime: 1000, size: 7 }),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn()
+          .mockResolvedValueOnce({ files: [], folders: ['wiki'] })         // root walk
+          .mockResolvedValueOnce({ files: ['wiki/a.md', 'wiki/b.md'], folders: [] }) // wiki walk
+          .mockResolvedValueOnce({ files: [], folders: [] }), // deleted-file check fallback
+      }
+      requestUrl.mockResolvedValue({ status: 200, json: { sha: 'remote-sha', object: { sha: 'head-sha' } } })
+      const sync = makeSync(adapter)
+      const msgs = await sync.push()
+      expect(msgs.some((m: string) => m.includes('ERRO') && m.includes('ENOENT'))).toBe(false)
+      expect(msgs.some((m: string) => m.includes('push:') || m.includes('alterados'))).toBe(true)
+    })
+
+    it('T-Android-03: push skips file when stat throws ENOENT (does not propagate)', async () => {
+      const adapter = {
+        read: vi.fn().mockRejectedValue(new Error('not found')),
+        write: vi.fn().mockResolvedValue(undefined),
+        readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
+        exists: vi.fn().mockResolvedValue(false),
+        stat: vi.fn().mockRejectedValue(new Error('ENOENT: no such file')),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue({ files: ['broken.md'], folders: [] }),
+      }
+      const sync = makeSync(adapter)
+      const msgs = await sync.push()
+      expect(msgs).toContain('Nada alterado')
+    })
+  })
+
   describe('quickStatus (fast remote check)', () => {
 
     it('reports remote ahead when SHA differs', async () => {
