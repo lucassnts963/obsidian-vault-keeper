@@ -1,6 +1,6 @@
 import type { VaultKeeperSettings } from '../settings'
 
-export type AgentCLI = 'claude' | 'opencode' | 'gemini' | 'custom'
+export type AgentCLI = 'claude' | 'opencode' | 'gemini' | 'agy' | 'custom'
 
 export const VAULT_METHODOLOGY_INSTRUCTIONS = `## Idioma / Language
 Responda sempre no mesmo idioma que o usuário usar.
@@ -46,7 +46,7 @@ export class CLIBridge {
     }
     if (!execSync) return null
 
-    const candidates: AgentCLI[] = ['claude', 'opencode', 'gemini']
+    const candidates: AgentCLI[] = ['claude', 'opencode', 'gemini', 'agy']
     for (const cli of candidates) {
       try {
         execSync(`which ${cli}`, { stdio: 'ignore' })
@@ -74,18 +74,19 @@ export class CLIBridge {
     if (!cli) return ''
 
     const pref = this.settings.cli?.preferred
-    const instrFile = pref === 'gemini' ? 'GEMINI.md' : pref === 'opencode' ? 'AGENTS.md' : 'CLAUDE.md'
+    // Instruction file per CLI
+    const instrFile = pref === 'gemini' ? 'GEMINI.md'
+      : (pref === 'opencode' || pref === 'agy') ? 'AGENTS.md'
+      : 'CLAUDE.md'
 
     // Session continuation flags per CLI:
-    //   claude   → --continue
-    //   opencode → --continue  (placed after `run`)
-    //   gemini   → --continue
+    //   claude / gemini / agy → --continue  (before -p)
+    //   opencode              → --continue  (after `run`)
     const cont = continueSession ? ' --continue' : ''
 
     // Non-interactive invocation syntax per CLI:
-    //   claude   → claude [--continue] -p "message"
-    //   gemini   → gemini [--continue] -p "message"
-    //   opencode → opencode run [--continue] "message"
+    //   claude / gemini / agy → <cli> [--continue] -p "message"
+    //   opencode              → opencode run [--continue] "message"
     const prompt = (message: string) =>
       pref === 'opencode'
         ? `${cli} run${cont} "${message}"`

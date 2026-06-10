@@ -82,6 +82,7 @@ export class VaultKeeperSettingTab extends PluginSettingTab {
         .addOption('claude', 'Claude Code')
         .addOption('opencode', 'OpenCode')
         .addOption('gemini', 'Gemini CLI')
+        .addOption('agy', 'Agy')
         .addOption('custom', 'Customizado')
         .setValue(this.plugin.settings.cli?.preferred || 'none')
         .onChange(async v => {

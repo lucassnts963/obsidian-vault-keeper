@@ -22,7 +22,7 @@ export interface GitSettings {
 
 /** External CLI settings (Claude Code, OpenCode, Gemini CLI, etc.) */
 export interface CLISettings {
-  preferred: 'claude' | 'opencode' | 'gemini' | 'custom' | 'none'
+  preferred: 'claude' | 'opencode' | 'gemini' | 'agy' | 'custom' | 'none'
   customBinaryPath: string
   autoDetect: boolean
 }
