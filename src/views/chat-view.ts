@@ -4,6 +4,13 @@ import { bubble, center, button, collapsible, loadingDots } from './ui'
 import { renderMarkdown } from './markdown'
 import { CLIBridge } from '../agents/cli-bridge'
 
+// eslint-disable-next-line no-control-regex
+const ANSI_RE = /\x1B\[[0-9;]*[mGKHFJA-Za-z]|\x1B\][^\x07]*\x07|\r/g
+
+function stripAnsi(str: string): string {
+  return str.replace(ANSI_RE, '')
+}
+
 export function extractAnswerContent(text: string): string | null {
   // Try find JSON with answer content anywhere
   const patterns = [
@@ -40,6 +47,9 @@ export class ChatView extends ItemView {
   private messages: ChatMessage[] = []
   private cliBridge: CLIBridge | null = null
   private continueSession = false
+  private cliRunning = false
+  private cliElapsed = 0
+  private cliTimer: ReturnType<typeof setInterval> | null = null
 
   constructor(leaf: WorkspaceLeaf, plugin: VaultKeeperPlugin) {
     super(leaf)
@@ -134,6 +144,16 @@ export class ChatView extends ItemView {
       this.renderMessage(chatArea, msg)
     }
 
+    if (this.cliRunning) {
+      const dots = '.'.repeat((this.cliElapsed % 3) + 1).padEnd(3, ' ')
+      const prog = chatArea.createEl('div')
+      prog.style.fontFamily = 'var(--font-monospace)'
+      prog.style.fontSize = '12px'
+      prog.style.padding = '4px 8px'
+      prog.style.color = 'var(--text-accent)'
+      prog.textContent = `⏳ Processando${dots} ${this.cliElapsed}s`
+    }
+
     // Input row
     const inputRow = this.contentEl.createEl('div')
     inputRow.style.display = 'flex'
@@ -194,19 +214,39 @@ export class ChatView extends ItemView {
       return
     }
 
-    const outputLines: string[] = []
     this.messages.push({ role: 'system', content: `▶ ${cmd}` })
+    this.cliRunning = true
+    this.cliElapsed = 0
+    this.cliTimer = setInterval(() => {
+      this.cliElapsed++
+      this.render()
+    }, 1000)
     this.render()
+
+    const outputLines: string[] = []
 
     try {
       const vaultPath = (this.plugin.app.vault.adapter as any).basePath || '.'
       await this.cliBridge!.spawn(cmd, vaultPath, (line) => {
-        outputLines.push(line)
-        this.messages.push({ role: 'cli-output', content: line })
+        const clean = stripAnsi(line)
+        if (!clean.trim()) return
+        outputLines.push(clean)
+        this.messages.push({ role: 'cli-output', content: clean })
         this.render()
       })
     } catch (err: any) {
       this.messages.push({ role: 'system', content: `Erro ao executar CLI: ${err.message}` })
+    } finally {
+      if (this.cliTimer) { clearInterval(this.cliTimer); this.cliTimer = null }
+      this.cliRunning = false
+      if (outputLines.length === 0) {
+        this.messages.push({
+          role: 'system',
+          content: `⚠️ CLI concluiu sem produzir saída (${this.cliElapsed}s). Verifique se o comando foi bem-sucedido.`,
+        })
+      } else {
+        this.messages.push({ role: 'system', content: `✅ Concluído (${this.cliElapsed}s)` })
+      }
     }
   }
 
