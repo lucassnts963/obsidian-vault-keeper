@@ -34,7 +34,17 @@ Escreva / Write the current task description em / to _slots/focus.md.
 Leia ao iniciar sessão / Read at session start para contexto / for context.`
 
 export class CLIBridge {
+  private currentProc: any = null
+
   constructor(private settings: VaultKeeperSettings) {}
+
+  abort(): void {
+    if (!this.currentProc) return
+    const proc = this.currentProc
+    proc.kill('SIGTERM')
+    setTimeout(() => { try { proc.kill('SIGKILL') } catch {} }, 3000)
+    this.currentProc = null
+  }
 
   static async detect(): Promise<AgentCLI | null> {
     if (typeof process === 'undefined' || !process.versions) return null
@@ -147,6 +157,7 @@ export class CLIBridge {
         stdio: ['ignore', 'pipe', 'pipe'],
         env,
       })
+      this.currentProc = proc
       const lines: string[] = []
       let timedOut = false
 
@@ -174,6 +185,7 @@ export class CLIBridge {
       })
 
       proc.on('close', (code: number | null) => {
+        this.currentProc = null
         if (killTimer) clearTimeout(killTimer)
         resolve({ exitCode: code ?? 0, stdout: lines.join('\n'), timedOut })
       })
