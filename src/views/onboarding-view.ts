@@ -166,7 +166,7 @@ export class OnboardingView extends ItemView {
   }
 
   private async writeInstructionFiles() {
-    const files = CLIBridge.buildInstructions()
+    const files = CLIBridge.buildInstructions(this.plugin.settings)
     for (const [name, content] of Object.entries(files)) {
       try {
         await this.plugin.app.vault.adapter.write(name, content)

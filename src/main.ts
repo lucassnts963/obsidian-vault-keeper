@@ -7,6 +7,7 @@ import { InboxView, INBOX_VIEW_TYPE } from './views/inbox-view'
 import { ChatView, CHAT_VIEW_TYPE } from './views/chat-view'
 import { LintView, LINT_VIEW_TYPE } from './views/lint-view'
 import { OnboardingView, ONBOARDING_VIEW_TYPE } from './views/onboarding-view'
+import { HelpView, HELP_VIEW_TYPE } from './views/help-view'
 import { LLMProvider, createProvider } from './llm/provider'
 import { WikiOps } from './wiki/ops'
 import { Logger } from './wiki/log'
@@ -75,6 +76,7 @@ export default class VaultKeeperPlugin extends Plugin {
     this.registerView(CHAT_VIEW_TYPE, (leaf) => new ChatView(leaf, this))
     this.registerView(LINT_VIEW_TYPE, (leaf) => new LintView(leaf, this))
     this.registerView(ONBOARDING_VIEW_TYPE, (leaf) => new OnboardingView(leaf, this))
+    this.registerView(HELP_VIEW_TYPE, (leaf) => new HelpView(leaf, this))
 
     this.addCommand({
       id: 'open-inbox',
@@ -202,10 +204,17 @@ export default class VaultKeeperPlugin extends Plugin {
       hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'O' }],
       callback: () => this.openFocusModal(),
     })
+    this.addCommand({
+      id: 'open-help',
+      name: 'Ajuda e instruções para IA',
+      hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'H' }],
+      callback: () => this.activateView(HELP_VIEW_TYPE),
+    })
 
     this.addRibbonIcon('inbox', 'Vault Keeper: Inbox', () => this.activateView(INBOX_VIEW_TYPE))
     this.addRibbonIcon('message-square', 'Vault Keeper: Chat', () => this.activateView(CHAT_VIEW_TYPE))
     this.addRibbonIcon('search', 'Vault Keeper: Lint', () => this.activateView(LINT_VIEW_TYPE))
+    this.addRibbonIcon('help-circle', 'Vault Keeper: Ajuda', () => this.activateView(HELP_VIEW_TYPE))
     this.addRibbonIcon('wand', 'Vault Keeper: Configuração', () => this.activateView(ONBOARDING_VIEW_TYPE))
 
     if (this.github) {

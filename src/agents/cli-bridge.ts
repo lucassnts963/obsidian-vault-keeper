@@ -2,36 +2,64 @@ import type { VaultKeeperSettings } from '../settings'
 
 export type AgentCLI = 'claude' | 'opencode' | 'gemini' | 'agy' | 'custom'
 
-export const VAULT_METHODOLOGY_INSTRUCTIONS = `## Idioma / Language
+export function buildMethodologyInstructions(settings?: Partial<VaultKeeperSettings>): string {
+  const inbox = settings?.inboxPath ?? 'inbox'
+  const raw = settings?.rawPath ?? 'raw'
+  const wiki = settings?.wikiPath ?? 'wiki'
+  const projects = settings?.vaults?.projects ?? []
+
+  const projectBlock = projects.length > 0 ? `
+
+## Projetos / Projects
+${projects.map(p => `- **${p.name}** → \`${p.path}/\`${p.remote ? ` (repo: ${p.remote})` : ''}`).join('\n')}
+
+### Contexto de projeto / Project context (B-007)
+Fontes em \`projects/X/raw/\` → output em \`projects/X/wiki/{slug}.md\`.
+Links no index SEMPRE usam formato project-relative: \`[[wiki/slug|Título]]\`.
+Notas da raiz com foco ativo em projeto → slug prefixado: \`[[wiki/projeto-slug]]\` (evita colisão).` : ''
+
+  return `## Idioma / Language
 Responda sempre no mesmo idioma que o usuário usar.
 Always respond in the same language the user writes in.
 
 ## Estrutura do Vault / Vault Structure
-- inbox/        → notas brutas a revisar / raw notes to review (status: inbox)
-- raw/          → aprovadas aguardando ingest / approved, awaiting ingest (status: approved)
-- wiki/         → páginas compiladas / compiled knowledge pages (status: ingested)
-- wiki/_slots/  → estado de sessão / session state (focus.md, lint-report.md…)
-- .vault-keeper/bm25-index.json → índice BM25 leve / lightweight full-text index
+- \`${inbox}/\`        → notas brutas a revisar / raw notes to review (status: inbox)
+- \`${raw}/\`          → aprovadas aguardando ingest / approved, awaiting ingest (status: approved)
+- \`${wiki}/\`         → páginas compiladas / compiled knowledge pages (status: ingested)
+- \`${wiki}/_slots/\`  → estado de sessão / session state (focus.md, lint-report.md…)
+- \`.vault-keeper/bm25-index.json\` → índice BM25 leve / lightweight full-text index${projectBlock}
 
 ## Fluxos / Karpathy Methodology Flows
 
 ### Ingest
-Leia / Read raw/{arquivo/file}. Produza / Produce wiki/{slug}.md com / with YAML frontmatter:
+Leia / Read \`${raw}/{arquivo/file}\`. Produza / Produce \`${wiki}/{slug}.md\` com / with YAML frontmatter:
   title, category, tags, summary, key_entities, date, source
-Adicione linha em / Add row to wiki/index.md. Marque a fonte com status: ingested.
+Adicione linha em / Add row to \`${wiki}/index.md\`. Marque a fonte com \`status: ingested\`.
 
 ### Lint / Auditoria
-Escaneie / Scan wiki/ para / for: frontmatter ausente / missing frontmatter,
+Escaneie / Scan \`${wiki}/\` para / for: frontmatter ausente / missing frontmatter,
 páginas órfãs / orphaned pages, entradas faltando no index / missing index entries.
-Escreva relatório / Write report em / to wiki/_slots/lint-report.md.
+Escreva relatório / Write report em / to \`${wiki}/_slots/lint-report.md\`.
 
 ### Query / Consulta
-Use .vault-keeper/bm25-index.json para encontrar / to find relevant pages.
-Responda citando / Answer citing [[wiki/nome-da-pagina/page-name]]. Nunca invente fatos / Never invent facts.
+Use \`.vault-keeper/bm25-index.json\` para encontrar / to find relevant pages.
+Responda citando / Answer citing \`[[${wiki}/nome-da-pagina]]\`. Nunca invente fatos / Never invent facts.
 
 ### Focus / Foco
-Escreva / Write the current task description em / to _slots/focus.md.
-Leia ao iniciar sessão / Read at session start para contexto / for context.`
+Escreva / Write the current task description em / to \`_slots/focus.md\`.
+Leia ao iniciar sessão / Read at session start para contexto / for context.
+
+## Regras de Link / Link Rules (B-007)
+
+Links em arquivos wiki SEMPRE usam formato project-relative:
+  \`[[wiki/nome-da-pagina]]\`  ← correto (resolve no vault standalone e no vault raiz)
+  \`[[projects/X/wiki/nome]]\` ← NUNCA USAR (quebra no vault standalone)
+
+No vault raiz, Obsidian resolve \`[[wiki/slug]]\` para \`projects/X/wiki/slug.md\` via shortest-path
+(válido desde que não exista \`wiki/slug.md\` homônimo na raiz — prefixo de projeto evita isso).`
+}
+
+export const VAULT_METHODOLOGY_INSTRUCTIONS = buildMethodologyInstructions()
 
 export class CLIBridge {
   private currentProc: any = null
@@ -66,8 +94,8 @@ export class CLIBridge {
     return null
   }
 
-  static buildInstructions(): { 'CLAUDE.md': string; 'GEMINI.md': string; 'AGENTS.md': string } {
-    const body = VAULT_METHODOLOGY_INSTRUCTIONS
+  static buildInstructions(settings?: VaultKeeperSettings): { 'CLAUDE.md': string; 'GEMINI.md': string; 'AGENTS.md': string } {
+    const body = buildMethodologyInstructions(settings)
     return {
       'CLAUDE.md': `# Vault Keeper — Instruções para Claude Code\n\n${body}\n`,
       'GEMINI.md': `# Vault Keeper — Instruções para Gemini CLI\n\n${body}\n`,

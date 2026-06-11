@@ -15,7 +15,7 @@
 | Git Sync | GitHub REST API (fetch puro — sem isomorphic-git, sem shell; funciona no mobile) |
 | Auth | NONE (user configures API key / CLI in plugin settings) |
 | Language | TYPESCRIPT |
-| Test suite | vitest — **221 tests, 28 files** |
+| Test suite | vitest — **254 tests, 30 files** |
 
 ---
 
@@ -102,7 +102,8 @@ src/
     ├── onboarding-view.ts    # First-run wizard: fresh setup or migrate existing vault
     ├── chat-view.ts          # CLI Task Panel (CLI mode) + Vault Chat (LLM fallback)
     ├── inbox-view.ts         # Inbox panel with status filters + approve/reject buttons
-    ├── lint-view.ts          # Audit report with actionable buttons
+    ├── lint-view.ts          # Audit report with actionable buttons + slug collision detection
+    ├── help-view.ts          # Plugin help + "Atualizar instruções para IA" button
     ├── markdown.ts           # Markdown renderer
     └── ui.ts                 # Shared UI helpers
 ```
@@ -115,7 +116,7 @@ src/
 |---|---|---|
 | `npm run dev` | root | Bundle with sourcemaps (esbuild, single pass) |
 | `npm run build` | root | Type-check + production bundle (`main.js`) |
-| `npm test` | root | Run all 209 tests (vitest) |
+| `npm test` | root | Run all 254 tests (vitest) |
 | `npm run lint` | root | ESLint TypeScript |
 
 ---
@@ -154,16 +155,36 @@ Obsidian User
 ```
 <vault-root>/
 ├── inbox/          ← new content lands here (status: inbox)
-├── raw/            ← approved sources (status: raw)
+├── raw/            ← approved sources (status: approved)
 ├── wiki/           ← processed knowledge pages
 │   ├── index.md    ← master table (title, category, tags, summary)
 │   └── log.md      ← append-only activity log
-├── _slots/         ← live session state
+├── wiki/_slots/    ← live session state
 │   ├── focus.md    ← current task context
 │   └── lint-report.md
-└── .vault-keeper/
-    └── bm25-index.json   ← persistent full-text index
+├── .vault-keeper/
+│   └── bm25-index.json   ← persistent full-text index
+└── projects/             ← optional subproject vaults
+    └── alpha/
+        ├── inbox/  raw/  wiki/   ← same layout, own GitHub repo
 ```
+
+### Multi-vault / Project Context (B-007)
+
+When a project (`projects/X/`) is used both as standalone Obsidian vault and as a subproject in the root vault:
+
+**Ingest context detection** (`WikiOps.ingestFile`):
+- Source in `projects/X/raw/` → output: `projects/X/wiki/slug.md`, index: `projects/X/wiki/index.md`
+- Source in root `raw/` + active focus on `projects/X` → output: `wiki/X-slug.md` (prefixed slug)
+- Source in root `raw/` + no focus → output: `wiki/slug.md`
+
+**Link rules (CRITICAL):**
+```
+[[wiki/slug]]              ← ALWAYS use this (project-relative)
+[[projects/X/wiki/slug]]   ← NEVER use (breaks in standalone vault)
+```
+
+In the root vault, Obsidian resolves `[[wiki/slug]]` to `projects/X/wiki/slug.md` via shortest-path, because the file path ends with `wiki/slug.md`. Works in standalone too. Personal root notes about a project get a prefixed slug (`montisol-slug.md`) to avoid collision in the root graph view.
 
 ### Methodology Flow (Karpathy LLM Wiki)
 
@@ -178,10 +199,10 @@ inbox/*.md  ──approve──▶  raw/*.md  ──ingest──▶  wiki/*.md
 
 1. **Inbox** — content arrives with `status: inbox` (notes, clips, blog posts)
 2. **Approve** — user moves file to `raw/`, sets `status: approved`, activity logged. Rejected files stay in inbox with `status: rejected`.
-3. **Ingest** — LLM/CLI reads source → produces wiki page with YAML frontmatter (`title`, `summary`, `key_entities`, `tags`) + citations
+3. **Ingest** — LLM/CLI reads source → produces wiki page with YAML frontmatter (`title`, `summary`, `key_entities`, `tags`) + citations. Context-aware: project source → project wiki.
 4. **Index** — `wiki/index.md` and `bm25-index.json` updated automatically; upserts are serialized via write queue to prevent race conditions
 5. **Query** — BM25 search seeds LLM context → answer with `[[wiki/links]]`
-6. **Lint** — periodic audit: orphaned pages, missing index entries, frontmatter issues (uses configured paths, not hardcoded)
+6. **Lint** — periodic audit: orphaned pages, missing index entries, frontmatter issues, slug collisions across project wikis
 7. **Slots** — `_slots/focus.md` holds current session context (injected on every query)
 
 ---
@@ -322,6 +343,9 @@ Spec → Red (write failing test) → Green (implement) → Refactor → Repeat
 11. **All changes go through `.specs/`** — write spec first, implement second.
 12. **TDD is mandatory** — write tests BEFORE implementation.
 13. **Every view command must be accessible via both ribbon icon and command palette.**
+14. **Link format in wiki files is always project-relative** — `[[wiki/slug]]`, never `[[projects/X/wiki/slug]]`. See B-007 section above.
+15. **`ingestFile()` is context-aware** — pass `focusedProject` from `SlotsManager.getFocus()` so project notes land in the correct wiki dir.
+16. **`CLIBridge.buildInstructions(settings)` is settings-aware** — always pass current settings to regenerate instruction files with correct paths and project list. Called from `OnboardingView` and `HelpView`.
 
 ---
 
