@@ -9,3 +9,4 @@ Quando uma feature entrar em desenvolvimento, criar `.specs/changes/NNN-nome/spe
 | B-002 | ChatView como terminal | Média | standby |
 | B-003 | Clonar repositório | Média | done |
 | B-004 | Foco em projeto(s) | Alta | backlog |
+| B-005 | Approve respeita projeto | Alta | done |
