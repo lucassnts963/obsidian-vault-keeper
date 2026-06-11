@@ -234,5 +234,55 @@ describe('WikiOps', () => {
         ops.ingestFile({ path: 'raw/fonte.md' }, llm)
       ).rejects.toThrow(/existe|duplicad|já exist/i)
     })
+
+    it('T-01: project source → writes to project wiki and project index', async () => {
+      vault.files['projects/alpha/raw/nota.md'] = 'conteudo do projeto'
+
+      const llm = {
+        chat: vi.fn().mockResolvedValue(
+          JSON.stringify({ title: 'Reunião Alpha', category: 'meeting', tags: ['alpha'], summary: 's', content: 'c', links: [] })
+        ),
+      }
+      const ops = new WikiOps(vault as any, s)
+
+      await ops.ingestFile({ path: 'projects/alpha/raw/nota.md' }, llm)
+
+      expect(vault.files['projects/alpha/wiki/reuniao-alpha.md']).toBeDefined()
+      expect(vault.files['projects/alpha/wiki/index.md']).toContain('wiki/reuniao-alpha')
+      expect(vault.files['wiki/reuniao-alpha.md']).toBeUndefined()
+    })
+
+    it('T-02: root source without focus → writes to root wiki, no prefix', async () => {
+      vault.files['raw/nota.md'] = 'nota raiz'
+
+      const llm = {
+        chat: vi.fn().mockResolvedValue(
+          JSON.stringify({ title: 'Nota Raiz', category: 'general', tags: [], summary: 's', content: 'c', links: [] })
+        ),
+      }
+      const ops = new WikiOps(vault as any, s)
+
+      await ops.ingestFile({ path: 'raw/nota.md' }, llm, undefined)
+
+      expect(vault.files['wiki/nota-raiz.md']).toBeDefined()
+      expect(vault.files['wiki/index.md']).toContain('wiki/nota-raiz')
+    })
+
+    it('T-03: root source with focused project → slug prefixed with project name', async () => {
+      vault.files['raw/nota.md'] = 'nota sobre montisol'
+
+      const llm = {
+        chat: vi.fn().mockResolvedValue(
+          JSON.stringify({ title: 'Timeline', category: 'planning', tags: [], summary: 's', content: 'c', links: [] })
+        ),
+      }
+      const ops = new WikiOps(vault as any, s)
+
+      await ops.ingestFile({ path: 'raw/nota.md' }, llm, 'projects/montisol')
+
+      expect(vault.files['wiki/montisol-timeline.md']).toBeDefined()
+      expect(vault.files['wiki/index.md']).toContain('wiki/montisol-timeline')
+      expect(vault.files['wiki/timeline.md']).toBeUndefined()
+    })
   })
 })

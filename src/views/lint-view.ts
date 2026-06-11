@@ -117,6 +117,28 @@ export class LintView extends ItemView {
       issues.push({ severity: 'warning', page: 'index.md', path: this.plugin.settings.indexPath, description: 'Index não encontrado' })
     }
 
+    // Slug collision across project wikis
+    const allFiles = vault.getFiles ? vault.getFiles() : []
+    const projWikiFiles = allFiles.filter(f => /^projects\/[^/]+\/wiki\/[^/]+\.md$/.test(f.path))
+    const byBasename: Record<string, string[]> = {}
+    for (const f of projWikiFiles) {
+      const base = f.path.split('/').pop()!
+      const proj = f.path.split('/').slice(0, 2).join('/')
+      if (!byBasename[base]) byBasename[base] = []
+      if (!byBasename[base].includes(proj)) byBasename[base].push(proj)
+    }
+    for (const [base, projs] of Object.entries(byBasename)) {
+      if (projs.length > 1) {
+        const suggestions = projs.map(p => `${p.split('/').pop()}-${base}`).join(', ')
+        issues.push({
+          severity: 'warning',
+          page: base,
+          path: wikiPath,
+          description: `Colisão de slug em: ${projs.join(', ')} — considere renomear para ${suggestions}`,
+        })
+      }
+    }
+
     return issues
   }
 

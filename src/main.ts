@@ -143,7 +143,12 @@ export default class VaultKeeperPlugin extends Plugin {
       id: 'ingest-current',
       name: 'Ingest: arquivo atual',
       hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'I' }],
-      callback: () => this.wiki.ingestFile(this.app.workspace.getActiveFile(), this.llm),
+      callback: async () => {
+        const a = this.app.vault.adapter
+        const slots = new SlotsManager({ read: p => a.read(p), write: (p, c) => a.write(p, c), exists: p => a.exists(p), mkdir: p => a.mkdir(p) })
+        const focus = await slots.getFocus()
+        this.wiki.ingestFile(this.app.workspace.getActiveFile(), this.llm, focus.projects[0])
+      },
     })
     this.addCommand({
       id: 'approve-current',

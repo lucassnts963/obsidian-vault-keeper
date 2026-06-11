@@ -55,7 +55,7 @@ export class WikiOps {
     const pageContent = `${frontmatter}\n\n# ${title}\n\n${content}`
     await this.vault.create(wikiPath, pageContent)
 
-    await this.updateIndex(title, wikiPath, category, tags)
+    await this.updateIndex(title, wikiPath.replace('.md', ''), this.settings.indexPath, category, tags)
     await this.logOperation('write', title)
 
     const persist = new IndexPersistence(this.vault.adapter)
@@ -188,7 +188,7 @@ export class WikiOps {
   }
 
   /** Lê arquivo fonte → LLM propõe página wiki → cria */
-  async ingestFile(file: TFile | null, llm: LLMProvider | null): Promise<void> {
+  async ingestFile(file: TFile | null, llm: LLMProvider | null, focusedProject?: string): Promise<void> {
     if (!file) throw new Error('Nenhum arquivo selecionado')
     if (!llm) throw new Error('LLM não configurado')
 
@@ -215,11 +215,18 @@ export class WikiOps {
     const safeSummary = typeof proposal.summary === 'string' ? proposal.summary.trim() : ''
     const safeKeyEntities: string[] = Array.isArray(proposal.key_entities) ? proposal.key_entities : []
 
-    const wikiPath = `${this.settings.wikiPath}/${this.slugify(safeTitle)}.md`
+    const ctx = this.getIngestContext(file, focusedProject)
+    const slug = ctx.slugPrefix + this.slugify(safeTitle)
+    const wikiPath = `${ctx.wikiDir}/${slug}.md`
+    const linkPath = `wiki/${slug}`
 
     const exists = await this.vault.adapter.exists(wikiPath)
     if (exists) {
       throw new Error(`Página wiki já existe: ${wikiPath}`)
+    }
+
+    if (!(await this.vault.adapter.exists(ctx.wikiDir))) {
+      await this.vault.adapter.mkdir(ctx.wikiDir)
     }
 
     const fmLines = [
@@ -238,7 +245,7 @@ export class WikiOps {
     const pageContent = `${frontmatter}\n\n# ${safeTitle}\n\n${safeContent}\n\n## Links\n\n${safeLinks.join('\n')}`
     await this.vault.create(wikiPath, pageContent)
 
-    await this.updateIndex(safeTitle, wikiPath, safeCategory, safeTags)
+    await this.updateIndex(safeTitle, linkPath, ctx.indexPath, safeCategory, safeTags)
     await this.logOperation('ingest', safeTitle, file.path)
 
     const persist = new IndexPersistence(this.vault.adapter)
@@ -248,9 +255,8 @@ export class WikiOps {
     await this.vault.adapter.write(file.path, updatedSource)
   }
 
-  private async updateIndex(title: string, path: string, category: string, tags: string[]) {
-    const indexPath = this.settings.indexPath
-    const entry = `| [[${path.replace('.md', '')}|${title}]] | ${category} | ${tags.join(', ')} |`
+  private async updateIndex(title: string, linkPath: string, indexPath: string, category: string, tags: string[]) {
+    const entry = `| [[${linkPath}|${title}]] | ${category} | ${tags.join(', ')} |`
 
     const exists = await this.vault.adapter.exists(indexPath)
     if (exists) {
@@ -260,6 +266,19 @@ export class WikiOps {
       const header = '| Página | Categoria | Tags |\n|--------|-----------|------|\n'
       await this.vault.adapter.write(indexPath, header + entry)
     }
+  }
+
+  private getIngestContext(file: TFile, focusedProject?: string): {
+    wikiDir: string
+    indexPath: string
+    slugPrefix: string
+  } {
+    const m = file.path.match(/^(projects\/[^/]+)\//)
+    if (m) {
+      return { wikiDir: `${m[1]}/wiki`, indexPath: `${m[1]}/wiki/index.md`, slugPrefix: '' }
+    }
+    const prefix = focusedProject ? `${focusedProject.split('/').pop()}-` : ''
+    return { wikiDir: this.settings.wikiPath, indexPath: this.settings.indexPath, slugPrefix: prefix }
   }
 
   private async logOperation(op: string, title: string, source?: string) {
