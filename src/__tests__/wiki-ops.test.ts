@@ -135,6 +135,20 @@ describe('WikiOps', () => {
       expect(vault.adapter.remove).toHaveBeenCalledWith('inbox/nota.md')
       expect(vault.delete).not.toHaveBeenCalled()
     })
+
+    it('moves project inbox file to project raw (not vault root raw)', async () => {
+      vault.files['projects/alpha/inbox/nota.md'] = '---\ntitle: Nota\nstatus: inbox\n---\n\nconteudo do projeto'
+
+      const ops = new WikiOps(vault as any, s)
+      await ops.approve({ path: 'projects/alpha/inbox/nota.md' })
+
+      expect(vault.files['projects/alpha/inbox/nota.md']).toBeUndefined()
+      expect(vault.files['projects/alpha/raw/nota.md']).toBeDefined()
+      expect(vault.files['projects/alpha/raw/nota.md']).toContain('status: approved')
+      // must NOT land in vault root raw/
+      expect(vault.files['raw/nota.md']).toBeUndefined()
+      expect(vault.adapter.mkdir).toHaveBeenCalledWith('projects/alpha/raw')
+    })
   })
 
   describe('reject', () => {

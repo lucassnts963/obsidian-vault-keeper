@@ -20,8 +20,9 @@ export class WikiOps {
     const content = await this.vault.adapter.read(file.path)
     const updated = this.setFrontmatterStatus(content, 'approved')
     const newPath = file.path.replace(this.settings.inboxPath, this.settings.rawPath)
-    if (!(await this.vault.adapter.exists(this.settings.rawPath))) {
-      await this.vault.adapter.mkdir(this.settings.rawPath)
+    const targetDir = newPath.substring(0, newPath.lastIndexOf('/'))
+    if (targetDir && !(await this.vault.adapter.exists(targetDir))) {
+      await this.vault.adapter.mkdir(targetDir)
     }
     await this.vault.adapter.write(newPath, updated)
     await this.vault.adapter.remove(file.path)
