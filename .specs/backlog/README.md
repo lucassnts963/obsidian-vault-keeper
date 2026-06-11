@@ -10,3 +10,4 @@ Quando uma feature entrar em desenvolvimento, criar `.specs/changes/NNN-nome/spe
 | B-003 | Clonar repositório | Média | done |
 | B-004 | Foco em projeto(s) | Alta | backlog |
 | B-005 | Approve respeita projeto | Alta | done |
+| B-006 | Suporte a subprojetos | Média | backlog |
