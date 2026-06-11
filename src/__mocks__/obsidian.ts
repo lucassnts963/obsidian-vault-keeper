@@ -64,6 +64,12 @@ export class Setting {
     t.onChange = (fn: any) => { t._onChange = fn; return t }
     cb(t); this._toggle = t; return this
   }
+  addButton(cb: (b: any) => void): this {
+    const b: any = { _text: '', _onClick: null }
+    b.setButtonText = (t: string) => { b._text = t; return b }
+    b.onClick = (fn: any) => { b._onClick = fn; return b }
+    cb(b); return this
+  }
   setClass(_cls: string): this { return this }
   then(_cb: any): this { return this }
 }

@@ -28,6 +28,14 @@ export interface CLISettings {
   timeoutMinutes: number  // 0 = sem timeout
 }
 
+/** A project vault synced to its own GitHub repo */
+export interface ProjectVault {
+  name: string    // display name, e.g. 'alpha'
+  path: string    // relative path within vault, e.g. 'projects/alpha'
+  remote: string  // GitHub HTTPS URL for this project's repo
+  token?: string  // optional override; falls back to git.token if absent
+}
+
 export interface VaultKeeperSettings {
   llm: LLMSettings
   git: GitSettings
@@ -39,7 +47,7 @@ export interface VaultKeeperSettings {
   }
   vaults: {
     knowledge: string
-    projects: string[]
+    projects: ProjectVault[]
   }
   inboxPath: string
   rawPath: string

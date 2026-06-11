@@ -1,5 +1,6 @@
 import { App, PluginSettingTab, Setting } from 'obsidian'
 import type VaultKeeperPlugin from './main'
+import type { ProjectVault } from './settings'
 
 export class VaultKeeperSettingTab extends PluginSettingTab {
   plugin: VaultKeeperPlugin
@@ -340,6 +341,60 @@ export class VaultKeeperSettingTab extends PluginSettingTab {
           .onChange(async v => {
             this.plugin.settings.git.conflictStrategy = v as any
             await this.plugin.saveSettings()
+          }))
+
+      // === Projetos ===
+      containerEl.createEl('h3', { text: 'Projetos' })
+      containerEl.createEl('p', {
+        text: 'Subpastas do vault sincronizadas com repositórios GitHub próprios. Cada projeto pode ser aberto como vault independente.',
+        cls: 'setting-item-description',
+      })
+
+      const projects = this.plugin.settings.vaults.projects
+      for (let i = 0; i < projects.length; i++) {
+        const p = projects[i]
+        const row = containerEl.createDiv({ cls: 'vault-keeper-project-row' })
+        row.style.cssText = 'display:flex;gap:8px;align-items:center;margin-bottom:6px;flex-wrap:wrap'
+
+        const nameEl = row.createEl('input', { type: 'text', placeholder: 'nome', value: p.name })
+        nameEl.style.cssText = 'width:100px;flex-shrink:0'
+        const pathEl = row.createEl('input', { type: 'text', placeholder: 'path (ex: projects/alpha)', value: p.path })
+        pathEl.style.cssText = 'width:180px;flex-shrink:0'
+        const remoteEl = row.createEl('input', { type: 'text', placeholder: 'https://github.com/user/repo', value: p.remote })
+        remoteEl.style.cssText = 'flex:1;min-width:180px'
+        const tokenEl = row.createEl('input', { type: 'password', placeholder: 'token (opcional)', value: p.token || '' })
+        tokenEl.style.cssText = 'width:140px;flex-shrink:0'
+
+        const save = async () => {
+          projects[i] = {
+            name: nameEl.value.trim(),
+            path: pathEl.value.trim(),
+            remote: remoteEl.value.trim(),
+            token: tokenEl.value.trim() || undefined,
+          }
+          await this.plugin.saveSettings()
+        }
+        nameEl.addEventListener('change', save)
+        pathEl.addEventListener('change', save)
+        remoteEl.addEventListener('change', save)
+        tokenEl.addEventListener('change', save)
+
+        const removeBtn = row.createEl('button', { text: '✕' })
+        removeBtn.style.cssText = 'flex-shrink:0;cursor:pointer'
+        removeBtn.addEventListener('click', async () => {
+          this.plugin.settings.vaults.projects.splice(i, 1)
+          await this.plugin.saveSettings()
+          this.display()
+        })
+      }
+
+      new Setting(containerEl)
+        .addButton(btn => btn
+          .setButtonText('+ Adicionar projeto')
+          .onClick(async () => {
+            this.plugin.settings.vaults.projects.push({ name: '', path: '', remote: '' })
+            await this.plugin.saveSettings()
+            this.display()
           }))
     }
   }

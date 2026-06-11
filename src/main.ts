@@ -1,5 +1,5 @@
 import { Notice, Plugin, WorkspaceLeaf, addIcon, TAbstractFile } from 'obsidian'
-import { VaultKeeperSettings, DEFAULT_SETTINGS } from './settings'
+import { VaultKeeperSettings, DEFAULT_SETTINGS, ProjectVault } from './settings'
 import { VaultKeeperSettingTab } from './settings-tab'
 import { GitHubSync } from './github/sync'
 import { TermuxSync } from './termux/sync'
@@ -30,6 +30,7 @@ const PULL_ICON =
 export default class VaultKeeperPlugin extends Plugin {
   declare settings: VaultKeeperSettings
   github!: GitHubSync | null
+  projectSyncs: GitHubSync[] = []
   termux!: TermuxSync
   llm!: LLMProvider | null
   wiki!: WikiOps
@@ -52,28 +53,7 @@ export default class VaultKeeperPlugin extends Plugin {
     addIcon('vault-keeper-pull', PULL_ICON)
     this.addSettingTab(new VaultKeeperSettingTab(this.app, this))
 
-    if (this.settings.git.enabled && this.settings.git.remote && this.settings.git.token) {
-      try {
-        this.github = new GitHubSync(
-          this.app.vault,
-          {
-            enabled: this.settings.git.enabled,
-            remote: this.settings.git.remote,
-            token: this.settings.git.token,
-            authorName: this.settings.git.authorName || 'Vault Keeper',
-            authorEmail: this.settings.git.authorEmail || 'vault@keeper.local',
-            autoSyncMinutes: this.settings.git.autoSyncMinutes,
-            conflictStrategy: this.settings.git.conflictStrategy,
-          },
-          '.obsidian/vault-keeper',
-        )
-      } catch (err: any) {
-        new Notice(`Vault Keeper: erro ao iniciar sync — ${err.message}`, 8000)
-        this.github = null
-      }
-    } else {
-      this.github = null
-    }
+    this.initSyncs()
 
     this.termux = new TermuxSync(this.app.vault)
     this.llm = createProvider(this.settings.llm)
@@ -243,8 +223,10 @@ export default class VaultKeeperPlugin extends Plugin {
           this.saveTimers.set(file.path, setTimeout(async () => {
             this.saveTimers.delete(file.path)
             if (this.syncing) return
+            const sync = this.syncForFile(file.path)
+            if (!sync) return
             try {
-              await this.github!.pushFile(file.path)
+              await sync.pushFile(file.path)
               this.refreshStatusBar()
             } catch (err: any) {
               console.error('[vault-keeper] auto-push failed:', file.path, err.message)
@@ -319,16 +301,19 @@ export default class VaultKeeperPlugin extends Plugin {
     const notice = new Notice('🔄 Push...', 0)
     try {
       await this.github!.backupState()
-      const msgs = await this.github!.push((phase) => {
-        notice.setMessage(`🔄 ${phase}`)
-      })
+      const allSyncs = [this.github!, ...this.projectSyncs]
+      const allMsgs: string[] = []
+      for (const sync of allSyncs) {
+        const msgs = await sync.push((phase) => notice.setMessage(`🔄 ${phase}`))
+        allMsgs.push(...msgs)
+      }
       notice.hide()
 
-      const conflicts = msgs.filter((m: string) => m.includes('conflito')).length
-      const pushed = msgs.filter((m: string) => m.includes('push: ')).length
+      const conflicts = allMsgs.filter((m: string) => m.includes('conflito')).length
+      const pushed = allMsgs.filter((m: string) => m.includes('push: ')).length
       const summary = [`✅ Push: ${pushed} enviados`]
       if (conflicts > 0) summary.push(`⚠️ ${conflicts} conflitos (backup salvo como .conflict)`)
-      summary.push(...msgs.map((m: string) => `   ${m}`))
+      summary.push(...allMsgs.map((m: string) => `   ${m}`))
       new Notice(summary.join('\n'), 8000)
       this.refreshStatusBar()
     } catch (err: any) {
@@ -346,17 +331,20 @@ export default class VaultKeeperPlugin extends Plugin {
 
     const notice = new Notice('🔄 Pull...', 0)
     try {
-      const msgs = await this.github!.pull((phase) => {
-        notice.setMessage(`🔄 ${phase}`)
-      })
+      const allSyncs = [this.github!, ...this.projectSyncs]
+      const allMsgs: string[] = []
+      for (const sync of allSyncs) {
+        const msgs = await sync.pull((phase) => notice.setMessage(`🔄 ${phase}`))
+        allMsgs.push(...msgs)
+      }
       notice.hide()
 
-      const downloaded = msgs.filter((m: string) => m.includes('atualizados')).length > 0
-      const backups = msgs.filter((m: string) => m.includes('backup')).length
+      const downloaded = allMsgs.some((m: string) => m.includes('atualizados'))
+      const backups = allMsgs.filter((m: string) => m.includes('backup')).length
       if (downloaded) {
         const summary = ['📥 Pull concluído']
         if (backups > 0) summary.push(`⚠️ ${backups} backups salvos (.backup)`)
-        summary.push(...msgs.map((m: string) => `   ${m}`))
+        summary.push(...allMsgs.map((m: string) => `   ${m}`))
         new Notice(summary.join('\n'), 8000)
       } else {
         new Notice('📥 Pull: já atualizado', 3000)
@@ -378,12 +366,14 @@ export default class VaultKeeperPlugin extends Plugin {
     try {
       await this.github!.backupState()
 
+      const allSyncs = [this.github!, ...this.projectSyncs]
       let pushMsgs: string[] = []
       let pushFailed = false
       try {
-        pushMsgs = await this.github!.push((phase) => {
-          notice.setMessage(`🔄 ${phase}`)
-        })
+        for (const sync of allSyncs) {
+          const msgs = await sync.push((phase) => notice.setMessage(`🔄 ${phase}`))
+          pushMsgs.push(...msgs)
+        }
       } catch (err: any) {
         pushFailed = true
         pushMsgs = [`ERRO: ${err.message?.slice(0, 120)}`]
@@ -391,9 +381,13 @@ export default class VaultKeeperPlugin extends Plugin {
         new Notice(`⚠️ Push falhou: ${err.message?.slice(0, 100)}`, 5000)
       }
 
-      const pullMsgs = pushFailed ? [] : await this.github!.pull((phase) => {
-        notice.setMessage(`🔄 ${phase}`)
-      })
+      const pullMsgs: string[] = []
+      if (!pushFailed) {
+        for (const sync of allSyncs) {
+          const msgs = await sync.pull((phase) => notice.setMessage(`🔄 ${phase}`))
+          pullMsgs.push(...msgs)
+        }
+      }
       notice.hide()
 
       const allMsgs = [
@@ -425,9 +419,10 @@ export default class VaultKeeperPlugin extends Plugin {
       return
     }
 
+    const sync = this.syncForFile(file.path) || this.github
     const notice = new Notice(`🔄 Push: ${file.path}...`, 0)
     try {
-      const path = await this.github!.pushFile(file.path)
+      const path = await sync!.pushFile(file.path)
       notice.hide()
       new Notice(`✅ Push: ${path}`, 3000)
       this.refreshStatusBar()
@@ -525,13 +520,69 @@ export default class VaultKeeperPlugin extends Plugin {
   }
 
   async loadSettings() {
-    this.settings = Object.assign({}, DEFAULT_SETTINGS, await this.loadData())
+    const raw = await this.loadData()
+    this.settings = Object.assign({}, DEFAULT_SETTINGS, raw)
+    // Migrate legacy projects: string[] → ProjectVault[]
+    if (Array.isArray(this.settings.vaults?.projects)) {
+      this.settings.vaults.projects = this.settings.vaults.projects.map((p: any) =>
+        typeof p === 'string' ? { name: p.split('/').pop() || p, path: p, remote: '' } : p
+      )
+    }
   }
 
   async saveSettings() {
     await this.saveData(this.settings)
+    this.initSyncs()
     this.setupAutoSync()
     this.refreshStatusBar()
+  }
+
+  initSyncs(): void {
+    const git = this.settings.git
+    if (!git.enabled || !git.remote || !git.token) {
+      this.github = null
+      this.projectSyncs = []
+      return
+    }
+    const mainSettings = {
+      enabled: git.enabled,
+      remote: git.remote,
+      token: git.token,
+      authorName: git.authorName || 'Vault Keeper',
+      authorEmail: git.authorEmail || 'vault@keeper.local',
+      autoSyncMinutes: git.autoSyncMinutes,
+      conflictStrategy: git.conflictStrategy,
+    }
+    const projectPaths = (this.settings.vaults.projects || []).map((p: ProjectVault) => p.path).filter(Boolean)
+    try {
+      this.github = new GitHubSync(this.app.vault, mainSettings, '.obsidian/vault-keeper', '', projectPaths)
+    } catch (err: any) {
+      new Notice(`Vault Keeper: erro ao iniciar sync — ${err.message}`, 8000)
+      this.github = null
+    }
+    this.projectSyncs = (this.settings.vaults.projects || [])
+      .filter((p: ProjectVault) => p.remote && p.path)
+      .map((p: ProjectVault) => {
+        try {
+          return new GitHubSync(
+            this.app.vault,
+            { ...mainSettings, remote: p.remote, token: p.token || mainSettings.token },
+            '.obsidian/vault-keeper',
+            p.path,
+          )
+        } catch {
+          return null
+        }
+      })
+      .filter((s): s is GitHubSync => s !== null)
+  }
+
+  /** Find the sync instance responsible for a vault-relative file path. */
+  private syncForFile(vaultRelPath: string): GitHubSync | null {
+    for (const s of this.projectSyncs) {
+      if (s.ownsFile(vaultRelPath)) return s
+    }
+    return this.github?.ownsFile(vaultRelPath) ? this.github : null
   }
 
   onunload() {

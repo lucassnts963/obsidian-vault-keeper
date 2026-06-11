@@ -803,4 +803,99 @@ describe('GitHubSync', () => {
       expect(status.branch).toBe('main')
     })
   })
+
+  describe('Multi-repo — rootDir + excludeRoots', () => {
+    const settings = { remote: 'https://github.com/user/proj', token: 'ghp_test', authorName: 'T', authorEmail: 't@t.com', enabled: true, autoSyncMinutes: 0 }
+
+    it('T-MultiRepo-01: rootDir sync walks only that subdir and pushes with relative paths', async () => {
+      let savedState: string | null = null
+      const fileContent = '# Project page'
+      const fileBytes = new TextEncoder().encode(fileContent).slice()
+      const adapter = {
+        read: vi.fn().mockImplementation(async () => { if (savedState) return savedState; throw new Error('not found') }),
+        write: vi.fn().mockImplementation(async (_p: string, d: string) => { savedState = d }),
+        readBinary: vi.fn().mockResolvedValue(fileBytes.buffer),
+        exists: vi.fn().mockResolvedValue(true),
+        stat: vi.fn().mockResolvedValue({ mtime: 999, size: fileBytes.byteLength }),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        // Only returns files when listing the project subdir
+        list: vi.fn().mockImplementation(async (dir: string) => {
+          if (dir === 'projects/alpha') return { files: [], folders: ['wiki'] }
+          if (dir === 'projects/alpha/wiki') return { files: ['projects/alpha/wiki/page.md'], folders: [] }
+          return { files: [], folders: [] }
+        }),
+      }
+
+      const sync = new GitHubSync({ adapter } as any, settings, '.obsidian/vault-keeper', 'projects/alpha')
+
+      // Push: GET returns 404 (new file), PUT succeeds
+      requestUrl
+        .mockResolvedValueOnce({ status: 404, json: { message: 'Not Found' } })
+        .mockResolvedValueOnce({ status: 200, json: { sha: 'abc123' } })
+
+      const msgs = await sync.push()
+
+      // Should push wiki/page.md (NOT projects/alpha/wiki/page.md)
+      expect(msgs).toContain('push: wiki/page.md')
+      const putCall = (requestUrl as any).mock.calls.find((c: any) => c[0]?.method === 'PUT')
+      expect(putCall[0].url).toContain('/contents/wiki/page.md')
+      expect(putCall[0].url).not.toContain('projects/alpha')
+    })
+
+    it('T-MultiRepo-02: main sync with excludeRoots skips project subdir', async () => {
+      const adapter = {
+        read: vi.fn().mockRejectedValue(new Error('not found')),
+        write: vi.fn().mockResolvedValue(undefined),
+        readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
+        exists: vi.fn().mockResolvedValue(true),
+        stat: vi.fn().mockResolvedValue({ mtime: 1, size: 0 }),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockImplementation(async (dir: string) => {
+          if (dir === '' || dir === undefined) return { files: ['README.md'], folders: ['projects'] }
+          if (dir === 'projects') return { files: [], folders: ['alpha'] }
+          if (dir === 'projects/alpha') return { files: ['projects/alpha/wiki/secret.md'], folders: [] }
+          return { files: [], folders: [] }
+        }),
+      }
+
+      const mainSync = new GitHubSync({ adapter } as any, settings, '.obsidian/vault-keeper', '', ['projects/alpha'])
+      const walked: string[] = []
+      for await (const f of (mainSync as any).walkFiles()) walked.push(f)
+
+      // Should see README.md but NOT projects/alpha/wiki/secret.md
+      expect(walked).toContain('README.md')
+      expect(walked.some(f => f.includes('alpha'))).toBe(false)
+    })
+
+    it('T-MultiRepo-03: pull() with rootDir writes files under rootDir in vault', async () => {
+      let savedState: string | null = null
+      const fileContent = '# Remote page'
+      const adapter = {
+        read: vi.fn().mockImplementation(async () => { if (savedState) return savedState; throw new Error('not found') }),
+        write: vi.fn().mockImplementation(async (_p: string, d: string) => { if (!_p.endsWith('.json')) savedState = savedState; }),
+        readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
+        exists: vi.fn().mockResolvedValue(true),
+        stat: vi.fn().mockResolvedValue({ mtime: 1, size: 0 }),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue({ files: [], folders: [] }),
+      }
+
+      const sync = new GitHubSync({ adapter } as any, settings, '.obsidian/vault-keeper', 'projects/alpha')
+
+      requestUrl
+        .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'commit-1' } } })
+        .mockResolvedValueOnce({ status: 200, json: { tree: [
+          { type: 'blob', path: 'wiki/page.md', sha: 'git-sha-1', size: fileContent.length },
+        ]}})
+        .mockResolvedValueOnce({ status: 200, json: { content: btoa(fileContent) } })
+
+      await sync.pull()
+
+      // adapter.write should have been called with the vault path (projects/alpha/wiki/page.md)
+      const writeCalls = (adapter.write as any).mock.calls
+      const fileWrite = writeCalls.find((c: any) => c[0] === 'projects/alpha/wiki/page.md')
+      expect(fileWrite).toBeTruthy()
+      expect(fileWrite[1]).toBe(fileContent)
+    })
+  })
 })

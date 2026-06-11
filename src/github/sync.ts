@@ -107,15 +107,39 @@ export class GitHubSync {
   private repo: string
   private state: SyncState = { lastRemoteSHA: '', files: {} }
   private statePath: string
+  private rootDir: string
+  private excludeRoots: string[]
 
-  constructor(vault: Vault, settings: SyncSettings, pluginDataDir: string) {
+  constructor(vault: Vault, settings: SyncSettings, pluginDataDir: string, rootDir = '', excludeRoots: string[] = []) {
     this.vault = vault
     this.settings = settings
+    this.rootDir = rootDir
+    this.excludeRoots = excludeRoots
     const parsed = parseRemote(settings.remote)
     if (!parsed) throw new Error('Remote URL inválida: use https://github.com/user/repo')
     this.owner = parsed.owner
     this.repo = parsed.repo
-    this.statePath = `${pluginDataDir}/sync_state.json`
+    const suffix = rootDir ? '_' + rootDir.replace(/\//g, '_') : ''
+    this.statePath = `${pluginDataDir}/sync_state${suffix}.json`
+  }
+
+  /** Full vault-relative path for a rootDir-relative path. */
+  private vaultPath(rel: string): string {
+    return this.rootDir ? `${this.rootDir}/${rel}` : rel
+  }
+
+  /** Strip rootDir prefix from a vault-relative path; returns null if not under rootDir. */
+  private toRelPath(vaultRelPath: string): string | null {
+    if (!this.rootDir) return vaultRelPath
+    const prefix = this.rootDir + '/'
+    if (!vaultRelPath.startsWith(prefix)) return null
+    return vaultRelPath.slice(prefix.length)
+  }
+
+  /** True if this sync instance is responsible for the given vault-relative path. */
+  ownsFile(vaultRelPath: string): boolean {
+    if (this.rootDir) return vaultRelPath.startsWith(this.rootDir + '/')
+    return !this.excludeRoots.some(r => vaultRelPath.startsWith(r + '/'))
   }
 
   private get apiBase(): string {
@@ -230,12 +254,12 @@ export class GitHubSync {
       if (f.size && f.size > MAX_FILE_SIZE) { log(`pulado ${f.path} (>1MB)`); continue }
       log(`Clonando: ${downloaded + 1}/${files.length} — ${f.path}`)
       try {
-        await this.ensureParentDirs(f.path)
+        await this.ensureParentDirs(this.vaultPath(f.path))
         const remote = await this.apiGet(`/contents/${f.path}?ref=main`)
         if (!remote.content) continue
         const decoded = base64ToUint8Array(remote.content.replace(/\n/g, ''))
         const content = new TextDecoder('utf-8').decode(decoded)
-        await this.vault.adapter.write(f.path, content)
+        await this.vault.adapter.write(this.vaultPath(f.path), content)
         const contentBuf = new TextEncoder().encode(content)
         const hash = await sha256(contentBuf.slice().buffer)
         this.state.files[f.path] = { sha: hash, gitSha: f.sha, mtime: Date.now(), size: contentBuf.byteLength }
@@ -266,17 +290,21 @@ export class GitHubSync {
     await this.vault.adapter.write(this.backupPath, '')
   }
 
+  // dir is relative to rootDir; listDir is the vault-absolute path to list.
   private async* walkFiles(dir = ''): AsyncGenerator<string> {
+    const listDir = this.rootDir
+      ? (dir ? `${this.rootDir}/${dir}` : this.rootDir)
+      : dir
+    // Excluded roots are vault-absolute; bail before listing.
+    if (this.excludeRoots.includes(listDir)) return
     let list: { files: string[]; folders: string[] }
     try {
-      list = await this.vault.adapter.list(dir || '')
-    } catch {
-      return
-    }
+      list = await this.vault.adapter.list(listDir || '')
+    } catch { return }
     // CapacitorAdapter (Android) returns full vault-root-relative paths;
     // FileSystemAdapter (desktop) returns basenames. Normalize to basename.
     const strip = (name: string) =>
-      dir && name.startsWith(dir + '/') ? name.slice(dir.length + 1) : name
+      listDir && name.startsWith(listDir + '/') ? name.slice(listDir.length + 1) : name
 
     for (const file of list.files) {
       const base = strip(file)
@@ -296,16 +324,16 @@ export class GitHubSync {
     for await (const f of this.walkFiles()) {
       const cached = this.state.files[f]
       let stat: { mtime: number; size: number } | null = null
-      try { stat = await this.vault.adapter.stat(f) } catch { continue }
+      try { stat = await this.vault.adapter.stat(this.vaultPath(f)) } catch { continue }
       if (!stat || !cached || cached.size !== stat.size || cached.mtime !== stat.mtime) {
-        const buf = await this.vault.adapter.readBinary(f)
+        const buf = await this.vault.adapter.readBinary(this.vaultPath(f))
         const hash = await sha256(buf)
         if (!cached || cached.sha !== hash) localChanges.push(f)
       }
     }
     for (const f of Object.keys(this.state.files)) {
       if (!localChanges.includes(f)) {
-        const exists = await this.vault.adapter.exists(f)
+        const exists = await this.vault.adapter.exists(this.vaultPath(f))
         if (!exists) localChanges.push(f + ' (deletado)')
       }
     }
@@ -339,17 +367,19 @@ export class GitHubSync {
     return conflicts
   }
 
-  async pushFile(path: string): Promise<string> {
+  async pushFile(vaultRelPath: string): Promise<string> {
+    const relPath = this.toRelPath(vaultRelPath)
+    if (!relPath) return vaultRelPath  // not under this sync's rootDir, skip
     await this.loadState()
-    const buf = await this.vault.adapter.readBinary(path)
+    const buf = await this.vault.adapter.readBinary(vaultRelPath)
     const hash = await sha256(buf)
     const base64 = arrayBufferToBase64(buf)
-    const body: any = { message: `vault: update ${path}`, content: base64, branch: 'main' }
-    try { const remote = await this.apiGet(`/contents/${path}?ref=main`); body.sha = remote.sha } catch {}
-    await this.apiPut(`/contents/${path}`, body)
-    this.state.files[path] = { sha: hash, mtime: Date.now(), size: buf.byteLength }
+    const body: any = { message: `vault: update ${relPath}`, content: base64, branch: 'main' }
+    try { const remote = await this.apiGet(`/contents/${relPath}?ref=main`); body.sha = remote.sha } catch {}
+    await this.apiPut(`/contents/${relPath}`, body)
+    this.state.files[relPath] = { sha: hash, mtime: Date.now(), size: buf.byteLength }
     await this.saveState()
-    return path
+    return vaultRelPath
   }
 
   async push(onPhase?: (msg: string) => void): Promise<string[]> {
@@ -362,17 +392,17 @@ export class GitHubSync {
     const skipped: string[] = []
     for await (const f of this.walkFiles()) {
       let stat: { mtime: number; size: number } | null = null
-      try { stat = await this.vault.adapter.stat(f) } catch { continue }
+      try { stat = await this.vault.adapter.stat(this.vaultPath(f)) } catch { continue }
       if (!stat) continue
       if (stat.size > MAX_FILE_SIZE) { skipped.push(f); continue }
       const cached = this.state.files[f]
       if (cached && cached.size === stat.size && cached.mtime === stat.mtime) continue
-      const buf = await this.vault.adapter.readBinary(f)
+      const buf = await this.vault.adapter.readBinary(this.vaultPath(f))
       const hash = await sha256(buf)
       if (!cached || cached.sha !== hash) changed.push({ path: f, hash, size: stat.size })
     }
     for (const f of Object.keys(this.state.files)) {
-      const exists = await this.vault.adapter.exists(f)
+      const exists = await this.vault.adapter.exists(this.vaultPath(f))
       if (!exists && !deleted.includes(f)) deleted.push(f)
     }
     if (skipped.length > 0) log(`pulado ${skipped.length} arquivos > 1MB`)
@@ -387,8 +417,8 @@ export class GitHubSync {
       // Save backup of conflicted files
       for (const c of conflicts) {
         try {
-          const content = await this.vault.adapter.read(c.path)
-          await this.vault.adapter.write(`${c.path}.conflict.md`, content)
+          const content = await this.vault.adapter.read(this.vaultPath(c.path))
+          await this.vault.adapter.write(`${this.vaultPath(c.path)}.conflict.md`, content)
           log(`backup: ${c.path} → ${c.path}.conflict.md`)
         } catch (err: any) { log(`ERRO backup ${c.path}: ${err.message?.slice(0, 80)}`) }
       }
@@ -398,9 +428,8 @@ export class GitHubSync {
       if (conflictSet.has(path)) continue
 
       const file = this.vault.adapter as DataAdapter & { readBinary(path: string): Promise<ArrayBuffer> }
-      const content = await file.readBinary(path)
+      const content = await file.readBinary(this.vaultPath(path))
       const b64 = arrayBufferToBase64(content)
-      const existing = this.state.files[path]
       try {
         const body: any = { message: `vault: update ${path}`, content: b64, branch: 'main' }
         try { const remote = await this.apiGet(`/contents/${path}?ref=main`); body.sha = remote.sha } catch {}
@@ -449,7 +478,7 @@ export class GitHubSync {
         // Handle local modifications based on conflictStrategy
         if (cached) {
           try {
-            const localBuf = await this.vault.adapter.readBinary(f.path)
+            const localBuf = await this.vault.adapter.readBinary(this.vaultPath(f.path))
             const localHash = await sha256(localBuf)
             if (localHash !== cached.sha) {
               const strategy = this.settings.conflictStrategy ?? 'ask'
@@ -458,7 +487,7 @@ export class GitHubSync {
                 continue
               }
               const localContent = new TextDecoder('utf-8').decode(localBuf)
-              await this.vault.adapter.write(`${f.path}.backup.md`, localContent)
+              await this.vault.adapter.write(`${this.vaultPath(f.path)}.backup.md`, localContent)
               backups++
             }
           } catch {}
@@ -468,7 +497,8 @@ export class GitHubSync {
         if (!file.content) continue
         const decoded = base64ToUint8Array(file.content.replace(/\n/g, ''))
         const content = new TextDecoder('utf-8').decode(decoded)
-        await this.vault.adapter.write(f.path, content)
+        await this.ensureParentDirs(this.vaultPath(f.path))
+        await this.vault.adapter.write(this.vaultPath(f.path), content)
         const contentBuf = new TextEncoder().encode(content)
         const hash = await sha256(contentBuf.slice().buffer)
         this.state.files[f.path] = { sha: hash, gitSha: f.sha, mtime: Date.now(), size: contentBuf.byteLength }
