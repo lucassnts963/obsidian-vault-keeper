@@ -17,6 +17,7 @@ import { VaultIntegrityMonitor } from './agents/monitor'
 import { IndexPersistence } from './search/index-persistence'
 import { DiagnosticsModal } from './diagnostics/modal'
 import { CloneRepositoryModal } from './github/clone-modal'
+import { ConflictResolutionModal } from './github/conflict-modal'
 
 const SYNC_ICON =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>'
@@ -299,12 +300,20 @@ export default class VaultKeeperPlugin extends Plugin {
     if (!this.acquireLock()) return
 
     const notice = new Notice('🔄 Push...', 0)
+    const onConflict = this.settings.git.conflictStrategy === 'ask'
+      ? (conflicts: Array<{ path: string; localSHA: string; remoteSHA: string }>) => {
+          const modal = new ConflictResolutionModal(this.app, conflicts)
+          modal.open()
+          return modal.waitForDecision()
+        }
+      : undefined
+
     try {
       await this.github!.backupState()
       const allSyncs = [this.github!, ...this.projectSyncs]
       const allMsgs: string[] = []
       for (const sync of allSyncs) {
-        const msgs = await sync.push((phase) => notice.setMessage(`🔄 ${phase}`))
+        const msgs = await sync.push((phase) => notice.setMessage(`🔄 ${phase}`), onConflict)
         allMsgs.push(...msgs)
       }
       notice.hide()
@@ -312,7 +321,7 @@ export default class VaultKeeperPlugin extends Plugin {
       const conflicts = allMsgs.filter((m: string) => m.includes('conflito')).length
       const pushed = allMsgs.filter((m: string) => m.includes('push: ')).length
       const summary = [`✅ Push: ${pushed} enviados`]
-      if (conflicts > 0) summary.push(`⚠️ ${conflicts} conflitos (backup salvo como .conflict)`)
+      if (conflicts > 0) summary.push(`⚠️ ${conflicts} conflitos resolvidos`)
       summary.push(...allMsgs.map((m: string) => `   ${m}`))
       new Notice(summary.join('\n'), 8000)
       this.refreshStatusBar()

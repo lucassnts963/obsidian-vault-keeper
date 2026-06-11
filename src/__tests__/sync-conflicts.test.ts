@@ -30,7 +30,7 @@ function mockVault() {
   }
 }
 
-function makeSync(vault: any, cachedFiles?: Record<string, { sha: string; mtime: number; size: number }>) {
+function makeSync(vault: any, cachedFiles?: Record<string, { sha: string; gitSha?: string; mtime: number; size: number }>) {
   const state: any = { lastRemoteSHA: 'abc', files: cachedFiles || {} }
   vault.files['/test/sync_state.json'] = JSON.stringify(state)
   vault.dirs.push('/test')
@@ -52,8 +52,17 @@ describe('detectConflicts', () => {
   it('returns empty when no local files changed remotely', async () => {
     const v = mockVault()
     const localSHA = await hex('conteudo')
+    const sync = makeSync(v, { 'nota.md': { sha: localSHA, gitSha: 'git-sha-abc', mtime: 100, size: 8 } })
+    requestUrl.mockResolvedValueOnce({ status: 200, json: { sha: 'git-sha-abc' } })
+    const conflicts = await (sync as any).detectConflicts(['nota.md'])
+    expect(conflicts).toEqual([])
+  })
+
+  it('returns empty when cached.gitSha is unknown (file never pulled)', async () => {
+    const v = mockVault()
+    const localSHA = await hex('conteudo')
     const sync = makeSync(v, { 'nota.md': { sha: localSHA, mtime: 100, size: 8 } })
-    requestUrl.mockResolvedValueOnce({ status: 200, json: { sha: localSHA } })
+    // No API call should happen since gitSha is absent
     const conflicts = await (sync as any).detectConflicts(['nota.md'])
     expect(conflicts).toEqual([])
   })
@@ -61,7 +70,7 @@ describe('detectConflicts', () => {
   it('detects file changed both locally and remotely', async () => {
     const v = mockVault()
     const cachedSHA = await hex('versao antiga')
-    const sync = makeSync(v, { 'nota.md': { sha: cachedSHA, mtime: 100, size: 12 } })
+    const sync = makeSync(v, { 'nota.md': { sha: cachedSHA, gitSha: 'old-git-sha', mtime: 100, size: 12 } })
     await sync.loadState()
 
     requestUrl.mockResolvedValueOnce({ status: 200, json: { sha: 'remote-different-sha' } })
@@ -77,7 +86,7 @@ describe('push with conflicts', () => {
   it('saves backup for conflicted files and skips push', async () => {
     const v = mockVault()
     v.files['conflict.md'] = 'minha versao'
-    const sync = makeSync(v, { 'conflict.md': { sha: 'old-cached-sha', mtime: 100, size: 10 } })
+    const sync = makeSync(v, { 'conflict.md': { sha: 'old-cached-sha', gitSha: 'old-git-sha', mtime: 100, size: 10 } })
 
     // detectConflicts call
     requestUrl.mockResolvedValueOnce({ status: 200, json: { sha: 'remote-different-sha' } })

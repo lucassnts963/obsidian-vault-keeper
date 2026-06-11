@@ -356,10 +356,10 @@ export class GitHubSync {
     const conflicts: { path: string; localSHA: string; remoteSHA: string }[] = []
     for (const path of changedFiles) {
       const cached = this.state.files[path]
-      if (!cached) continue
+      if (!cached || !cached.gitSha) continue
       try {
         const remote = await this.apiGet(`/contents/${path}?ref=main`)
-        if (remote.sha !== cached.sha) {
+        if (remote.sha !== cached.gitSha) {
           conflicts.push({ path, localSHA: cached.sha, remoteSHA: remote.sha })
         }
       } catch {}
@@ -376,13 +376,16 @@ export class GitHubSync {
     const base64 = arrayBufferToBase64(buf)
     const body: any = { message: `vault: update ${relPath}`, content: base64, branch: 'main' }
     try { const remote = await this.apiGet(`/contents/${relPath}?ref=main`); body.sha = remote.sha } catch {}
-    await this.apiPut(`/contents/${relPath}`, body)
-    this.state.files[relPath] = { sha: hash, mtime: Date.now(), size: buf.byteLength }
+    const putRes = await this.apiPut(`/contents/${relPath}`, body)
+    this.state.files[relPath] = { sha: hash, gitSha: putRes?.content?.sha, mtime: Date.now(), size: buf.byteLength }
     await this.saveState()
     return vaultRelPath
   }
 
-  async push(onPhase?: (msg: string) => void): Promise<string[]> {
+  async push(
+    onPhase?: (msg: string) => void,
+    onConflict?: (c: Array<{ path: string; localSHA: string; remoteSHA: string }>) => Promise<Map<string, 'keep-local' | 'keep-remote' | 'keep-both'>>,
+  ): Promise<string[]> {
     await this.loadState()
     const commits: string[] = []
     const log = (msg: string) => { commits.push(msg); onPhase?.(msg) }
@@ -413,14 +416,32 @@ export class GitHubSync {
     const conflictSet = new Set(conflicts.map(c => c.path))
 
     if (conflicts.length > 0) {
-      log(`⚠️ ${conflicts.length} conflitos detectados`)
-      // Save backup of conflicted files
+      log(`⚠️ ${conflicts.length} conflito${conflicts.length !== 1 ? 's' : ''} detectado${conflicts.length !== 1 ? 's' : ''}`)
+      const strategy = this.settings.conflictStrategy ?? 'ask'
+      let decisions: Map<string, 'keep-local' | 'keep-remote' | 'keep-both'>
+      if (strategy === 'ask' && onConflict) {
+        decisions = await onConflict(conflicts)
+      } else if (strategy === 'keep-local') {
+        decisions = new Map(conflicts.map(c => [c.path, 'keep-local' as const]))
+      } else if (strategy === 'keep-remote') {
+        decisions = new Map(conflicts.map(c => [c.path, 'keep-remote' as const]))
+      } else {
+        decisions = new Map(conflicts.map(c => [c.path, 'keep-both' as const]))
+      }
       for (const c of conflicts) {
-        try {
-          const content = await this.vault.adapter.read(this.vaultPath(c.path))
-          await this.vault.adapter.write(`${this.vaultPath(c.path)}.conflict.md`, content)
-          log(`backup: ${c.path} → ${c.path}.conflict.md`)
-        } catch (err: any) { log(`ERRO backup ${c.path}: ${err.message?.slice(0, 80)}`) }
+        const decision = decisions.get(c.path) ?? 'keep-both'
+        if (decision === 'keep-local') {
+          conflictSet.delete(c.path)
+          log(`conflito: ${c.path} → enviando versão local`)
+        } else if (decision === 'keep-remote') {
+          log(`conflito: ${c.path} → mantendo versão remota`)
+        } else {
+          try {
+            const content = await this.vault.adapter.read(this.vaultPath(c.path))
+            await this.vault.adapter.write(`${this.vaultPath(c.path)}.conflict.md`, content)
+            log(`conflito: ${c.path} → backup em .conflict.md`)
+          } catch (err: any) { log(`ERRO backup ${c.path}: ${err.message?.slice(0, 80)}`) }
+        }
       }
     }
 
@@ -433,8 +454,8 @@ export class GitHubSync {
       try {
         const body: any = { message: `vault: update ${path}`, content: b64, branch: 'main' }
         try { const remote = await this.apiGet(`/contents/${path}?ref=main`); body.sha = remote.sha } catch {}
-        await this.apiPut(`/contents/${path}`, body)
-        this.state.files[path] = { sha: hash, mtime: Date.now(), size: content.byteLength }
+        const putRes = await this.apiPut(`/contents/${path}`, body)
+        this.state.files[path] = { sha: hash, gitSha: putRes?.content?.sha, mtime: Date.now(), size: content.byteLength }
         log(`push: ${path}`)
       } catch (err: any) { log(`ERRO push ${path}: ${err.message?.slice(0, 80)}`) }
       await delay(API_DELAY_MS)

@@ -1,4 +1,4 @@
-import { ItemView, WorkspaceLeaf, Notice } from 'obsidian'
+import { ItemView, WorkspaceLeaf, Notice, setIcon } from 'obsidian'
 import type VaultKeeperPlugin from '../main'
 import { bubble, center, collapsible, loadingDots } from './ui'
 import { renderMarkdown } from './markdown'
@@ -154,15 +154,9 @@ export class ChatView extends ItemView {
       if (CLIBridge.isDesktop()) {
         const stopBtn = headerBtns.createEl('button') as HTMLButtonElement
         this.stopBtnEl = stopBtn
-        stopBtn.textContent = '⏹ Parar'
+        stopBtn.addClass('clickable-icon')
         stopBtn.title = 'Interromper o CLI em execução (SIGTERM)'
-        stopBtn.style.fontSize = '11px'
-        stopBtn.style.padding = '2px 8px'
-        stopBtn.style.borderRadius = '4px'
-        stopBtn.style.cursor = 'pointer'
-        stopBtn.style.border = '1px solid var(--background-modifier-border)'
-        stopBtn.style.background = 'var(--background-modifier-error)'
-        stopBtn.style.color = 'var(--text-error)'
+        setIcon(stopBtn, 'square')
         stopBtn.style.display = 'none'
         stopBtn.addEventListener('click', () => {
           this.userAborted = true
