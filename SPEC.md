@@ -1,7 +1,7 @@
 # Vault Keeper — Especificação Completa
 
 > Obsidian plugin para metodologia completa de gestão de conhecimento pessoal com LLM.
-> Versão atual: **0.2.0**
+> Versão atual: **0.3.0**
 
 ---
 
@@ -39,18 +39,21 @@ Além disso, gerencia sincronização Git e serve como interface LLM-agnóstica 
 | Git Sync | GitHub REST API (`requestUrl()`) + Termux bridge |
 | LLM | HTTP fetch para endpoint OpenAI-compatible |
 | Hash | SubtleCrypto (SHA-256, nativo do browser) + fallback JS puro |
-| Testes | Vitest (35 testes) |
+| Testes | Vitest (238 testes) |
 
 ### 2.2 Estrutura de Diretórios
 
 ```
 src/
-├── main.ts                   # Plugin entry point (onload/onunload)
-├── settings.ts               # Config schema + defaults
-├── settings-tab.ts           # Obsidian SettingTab UI
+├── main.ts                   # Plugin entry point — registra views, commands, initSyncs()
+├── settings.ts               # Config schema + defaults (inclui ProjectVault)
+├── settings-tab.ts           # Obsidian SettingTab UI (inclui seção Projetos)
 ├── github/
-│   ├── sync.ts               # GitHub REST API sync (push/pull/status/pushFile/quickStatus)
-│   └── base64.ts             # Base64 chunked encode/decode (sem atob/btoa)
+│   ├── sync.ts               # GitHubSync: push/pull/clone/status, rootDir + excludeRoots
+│   ├── base64.ts             # Base64 chunked encode/decode (sem atob/btoa)
+│   └── clone-modal.ts        # Modal de clonagem de repositório remoto
+├── diagnostics/
+│   └── probe.ts              # Diagnóstico de adapter (walk, stat, contagem)
 ├── termux/
 │   └── sync.ts               # Termux bridge (comandos copia-e-cola)
 ├── llm/
@@ -58,22 +61,34 @@ src/
 ├── wiki/
 │   ├── ops.ts                # Ingest, write page, update index/log
 │   └── log.ts                # Logger append-only
+├── agents/
+│   ├── cli-bridge.ts         # Detecção CLI, spawn com abort() (SIGTERM→SIGKILL)
+│   └── monitor.ts            # Watch wiki/ → reindexação BM25 debounced
+├── search/
+│   ├── bm25.ts               # Okapi BM25 puro TypeScript
+│   ├── index-builder.ts      # WikiSearchIndex
+│   └── index-persistence.ts  # .vault-keeper/bm25-index.json com write queue
 ├── views/
+│   ├── onboarding-view.ts    # Wizard primeira execução
+│   ├── chat-view.ts          # CLI Task Panel + Vault Chat + botão ⏹ Parar
 │   ├── inbox-view.ts         # Inbox panel com filtros de status
-│   ├── chat-view.ts          # Vault Chat com citações do LLM
 │   └── lint-view.ts          # Relatório de auditoria
+├── scripts/
+│   └── install.sh            # Build + zip + deploy (desktop e Android via adb)
 └── __tests__/
-    └── github-sync.test.ts   # 35 testes unitários
+    └── github-sync.test.ts   # 238 testes unitários
 ```
 
 ### 2.3 Bundle
 
-| Métrica | v0.1.0 (isomorphic-git) | v0.2.0 (GitHub API) |
-|---------|------------------------|---------------------|
-| Tamanho | 227 KB | **26 KB** |
-| Dependências | isomorphic-git, buffer, yaml, pako, crypto | **yaml** |
-| Polyfills | Buffer, process, stream | **Nenhum** |
-| Testes | 0 | **35 (vitest)** |
+| Métrica | v0.1.0 (isomorphic-git) | v0.2.0 (GitHub API) | v0.3.0 |
+|---------|------------------------|---------------------|--------|
+| Tamanho | 227 KB | 26 KB | **96 KB** |
+| Dependências | isomorphic-git, buffer, yaml, pako, crypto | yaml | **yaml** |
+| Polyfills | Buffer, process, stream | Nenhum | **Nenhum** |
+| Testes | 0 | 35 | **238 (vitest)** |
+
+> Crescimento de 26→96 KB deve-se ao BM25, scaffold, views completas e CLI bridge — todas features novas sem dependências externas.
 
 ---
 
@@ -93,19 +108,34 @@ Sincronização de arquivos via GitHub REST API. **Zero dependências de git.**
 | Criar/atualizar | PUT | `/repos/{owner}/{repo}/contents/{path}` |
 | Deletar | DELETE | `/repos/{owner}/{repo}/contents/{path}` |
 
-#### 3.1.2 API do `GitHubSync`
+#### 3.1.2 Construtor e Multi-repo
+
+```typescript
+new GitHubSync(vault, settings, pluginDataDir, rootDir?, excludeRoots?)
+```
+
+| Parâmetro | Tipo | Descrição |
+|-----------|------|-----------|
+| `rootDir` | `string` (default `''`) | Subpasta do vault scoped a este sync (ex: `'projects/alpha'`). Paths enviados ao GitHub são relativos a `rootDir`. |
+| `excludeRoots` | `string[]` (default `[]`) | Subpastas a ignorar no walk — usado pelo main sync para pular subpastas de projeto. |
+
+O state file recebe sufixo único por projeto: `sync_state_projects_alpha.json`.
+
+#### 3.1.3 API do `GitHubSync`
 
 | Método | Descrição |
 |--------|-----------|
-| `push(onPhase?)` | Varre vault → envia `.md` alterados/deletados via Contents API |
-| `pull(onPhase?)` | Compara remote SHA → baixa arquivos alterados via Trees API |
+| `push(onPhase?)` | Varre vault (respeitando rootDir/excludeRoots) → envia `.md` alterados/deletados |
+| `pull(onPhase?)` | Compara remote SHA → baixa arquivos alterados, escreve em `rootDir/` |
+| `clone(onPhase?)` | Baixa todos os `.md` do repo remoto, cria diretórios, salva SHA-256 + gitSha no state |
 | `status()` | Varre vault local + compara SHA remoto → relatório completo |
 | `quickStatus()` | Apenas GET `/git/ref/heads/main` → compara SHA (sem I/O local) |
-| `pushFile(path)` | Push de um único arquivo via Contents API (com SHA check) |
-| `backupState()` | Salva `sync_state.json` em `sync_state.json.backup` antes de push |
+| `pushFile(vaultPath)` | Push de arquivo único; strip do prefixo rootDir para o path no GitHub |
+| `ownsFile(vaultPath)` | Retorna true se este sync é responsável pelo arquivo (usado para roteamento) |
+| `backupState()` | Salva `sync_state.json` em `.backup` antes de push |
 | `restoreBackup()` | Restaura state do backup + limpa arquivo de backup |
 
-#### 3.1.3 Robustez Mobile
+#### 3.1.4 Robustez Mobile
 
 | Mecanismo | Descrição |
 |-----------|-----------|
@@ -115,15 +145,19 @@ Sincronização de arquivos via GitHub REST API. **Zero dependências de git.**
 | **Rate-limit** | 100ms entre PUT/DELETE, 50ms entre GET (evita secondary rate limit do GitHub). |
 | **Max file size** | Arquivos > 1MB são pulados com log de aviso (GitHub Contents API rejeita). |
 | **ensureDataDir()** | Cria `.obsidian/vault-keeper/` via `adapter.mkdir()` antes de toda escrita (mobile não auto-cria dirs). |
+| **ensureParentDirs()** | Cria recursivamente diretórios intermediários antes de `write()` — necessário em pull/clone no Android. |
 | **Snapshot safety** | `backupState()` salva state antes do push. Se push falhar, `restoreBackup()` recupera estado anterior. |
+| **walkFiles strip** | CapacitorAdapter (Android) retorna paths completos de `list()` em vez de basenames. `walkFiles` normaliza com `strip()` antes de concatenar. |
+| **SHA duplo** | `FileEntry` tem dois campos: `sha` (SHA-256 do conteúdo, usado em push) e `gitSha` (Git blob SHA1 do GitHub, usado no skip de pull). Formatos incompatíveis → campos separados evitam push redundante após pull/clone. |
+| **PUT com SHA** | `push()` sempre busca o SHA remoto atual antes de cada PUT, evitando erro 422 "sha wasn't supplied" para arquivos que existem no GitHub mas não no state local. |
 
-#### 3.1.4 Otimização do `status()`
+#### 3.1.5 Otimização do `status()`
 
 Antes de hashear um arquivo, compara `adapter.stat()` → `mtime` + `size` com o cache. Só faz SHA-256 se `stat` diferir. Reduz drasticamente I/O no mobile.
 
 Se `adapter.stat()` não estiver disponível (mobile), o catch é silencioso (`continue`), sem false positive.
 
-#### 3.1.5 Ordem Push → Pull
+#### 3.1.6 Ordem Push → Pull
 
 Correção crítica para mobile: o `doSync()` agora faz **push antes do pull**. A ordem anterior `pull → push` fazia o pull sobrescrever modificações locais antes do push detectá-las.
 
@@ -133,21 +167,32 @@ doPush() = backupState() → push() → [rollback on fail]
 doPull() = pull()
 ```
 
-#### 3.1.6 State Tracking
+#### 3.1.7 State Tracking
 
-Arquivo `sync_state.json` na pasta `.obsidian/vault-keeper/`:
+Arquivo `sync_state.json` (main) ou `sync_state_<rootDir>.json` (projeto) em `.obsidian/vault-keeper/`:
 
 ```json
 {
   "lastRemoteSHA": "abc123...",
   "files": {
-    "inbox/nota.md": { "sha": "def456...", "mtime": 1718234567890, "size": 2048 },
-    "wiki/pagina.md": { "sha": "ghi789...", "mtime": 1718234567891, "size": 5120 }
+    "wiki/pagina.md": {
+      "sha":    "e3b0c44...",
+      "gitSha": "a1b2c3d...",
+      "mtime":  1718234567891,
+      "size":   5120
+    }
   }
 }
 ```
 
-Campos por arquivo: `sha` (SHA-256), `mtime` (timestamp), `size` (bytes). O campo `size` foi adicionado em v0.2.0 para otimizar `status()`.
+| Campo | Tipo | Descrição |
+|-------|------|-----------|
+| `sha` | SHA-256 hex (64 chars) | Hash do conteúdo do arquivo — usado em `push()` para detectar mudança |
+| `gitSha` | Git blob SHA1 (40 chars) | Hash do blob GitHub — usado em `pull()` para skip de arquivos inalterados |
+| `mtime` | timestamp ms | Último `mtime` registrado — otimização: pula SHA se `stat` não mudou |
+| `size` | bytes | Último tamanho — otimização conjunta com `mtime` |
+
+> `sha` e `gitSha` são formatos incompatíveis. Campos separados resolvem o bug que causava push de todos os arquivos após pull/clone.
 
 ### 3.2 Base64 Chunked (`src/github/base64.ts`)
 
@@ -268,6 +313,13 @@ Todas as views estão como **stubs** — mostram "em desenvolvimento". A UI comp
 ### 4.1 Schema
 
 ```typescript
+interface ProjectVault {
+  name: string    // display name, ex: 'alpha'
+  path: string    // relativo ao vault, ex: 'projects/alpha'
+  remote: string  // URL GitHub deste projeto
+  token?: string  // token próprio; sem isso usa git.token
+}
+
 interface VaultKeeperSettings {
   llm: {
     provider: 'http' | 'ollama' | 'hermes-gateway'
@@ -279,15 +331,28 @@ interface VaultKeeperSettings {
   git: {
     enabled: boolean
     remote: string          // ex: https://github.com/user/vault
-    username: string
     token: string           // GitHub personal access token
     authorName: string
     authorEmail: string
     autoSyncMinutes: number // 0 = desligado
+    syncOnOpen: boolean     // pull automático ao abrir vault
+    syncOnClose: boolean    // push automático ao fechar vault
+    conflictStrategy: 'ask' | 'keep-local' | 'keep-remote'
+  }
+  cli: {
+    preferred: 'claude' | 'opencode' | 'gemini' | 'agy' | 'custom' | 'none'
+    customBinaryPath: string
+    autoDetect: boolean
+    timeoutMinutes: number  // 0 = sem timeout
+  }
+  agent: {
+    maxIterations: number   // default: 5
+    maxFileChars: number    // default: 3000
+    resetContext: boolean
   }
   vaults: {
     knowledge: string
-    projects: string[]
+    projects: ProjectVault[]
   }
   inboxPath: string         // default: 'inbox'
   rawPath: string           // default: 'raw'
@@ -301,28 +366,14 @@ interface VaultKeeperSettings {
 
 ```typescript
 {
-  llm: {
-    provider: 'http',
-    endpoint: 'https://api.deepseek.com/v1',
-    model: 'deepseek-chat',
-    apiKey: '',
-    maxTokens: 4096
-  },
-  git: {
-    enabled: false,
-    remote: '',
-    username: '',
-    token: '',
-    authorName: '',
-    authorEmail: '',
-    autoSyncMinutes: 0
-  },
+  llm: { provider: 'http', endpoint: 'https://api.deepseek.com/v1', model: 'deepseek-chat', apiKey: '', maxTokens: 4096 },
+  git: { enabled: false, remote: '', token: '', authorName: '', authorEmail: '', autoSyncMinutes: 0,
+         syncOnOpen: true, syncOnClose: false, conflictStrategy: 'ask' },
+  cli: { preferred: 'none', customBinaryPath: '', autoDetect: true, timeoutMinutes: 5 },
+  agent: { maxIterations: 5, maxFileChars: 3000, resetContext: true },
   vaults: { knowledge: '', projects: [] },
-  inboxPath: 'inbox',
-  rawPath: 'raw',
-  wikiPath: 'wiki',
-  logPath: 'wiki/log.md',
-  indexPath: 'wiki/index.md'
+  inboxPath: 'inbox', rawPath: 'raw', wikiPath: 'wiki',
+  logPath: 'wiki/log.md', indexPath: 'wiki/index.md'
 }
 ```
 
@@ -335,11 +386,12 @@ interface VaultKeeperSettings {
 | `open-inbox` | Abrir inbox | Ativa InboxView |
 | `open-chat` | Vault Chat | Ativa ChatView |
 | `open-lint` | Auditoria (lint) | Ativa LintView |
-| `git-sync` | Sincronizar (push + pull) | push → pull com snapshot safety |
-| `git-push` | Push (enviar alterações) | backupState → push → rollback on fail |
-| `git-pull` | Pull (baixar alterações) | pull via GitHub API |
-| `git-push-current` | Push: arquivo atual | pushFile() do arquivo ativo no editor |
+| `git-sync` | Sincronizar (push + pull) | push → pull com snapshot safety (todos os repos) |
+| `git-push` | Push (enviar alterações) | backupState → push → rollback on fail (todos os repos) |
+| `git-pull` | Pull (baixar alterações) | pull via GitHub API (todos os repos) |
+| `git-push-current` | Push: arquivo atual | pushFile() do arquivo ativo — roteado para o sync correto |
 | `git-status` | Status do sync | Termux status + GitHub status completo |
+| `clone-repository` | Clonar repositório remoto | Modal de confirmação → clone() do main repo |
 | `termux-sync` | Termux: sync (pull+push) | Copia comando pro clipboard |
 | `termux-push` | Termux: push | Copia comando pro clipboard |
 | `termux-pull` | Termux: pull | Copia comando pro clipboard |
@@ -493,59 +545,75 @@ Usuário dispara Push: arquivo atual
 | 10 | `status()` travava load do vault no mobile | `walkFiles` + `sha256` de todos `.md` no onload | `quickStatus()` (só remote SHA) + debounce 5s na status bar |
 | 11 | `status()` falso-positivo no mobile | `adapter.stat()` inexistente marcava arquivo como alterado | Catch silencioso (`continue`) |
 | 12 | Concorrência de sync | Auto-sync + manual simultâneos | Mutex `syncing` boolean |
+| 13 | `walkFiles` double-path no Android | CapacitorAdapter retorna paths completos em `list()`, `walkFiles` concatenava prefix novamente → `wiki/wiki/page.md` | Normalização `strip()`: remove prefixo antes de concatenar |
+| 14 | Push 422 "sha wasn't supplied" | Arquivo existe no GitHub mas não no `sync_state` → `if (existing)` pulava GET do SHA | Sempre faz GET do SHA remoto; captura 404 (arquivo novo, sem SHA) |
+| 15 | Push envia todos os arquivos após pull/clone | `pull()` salvava Git blob SHA1 em `FileEntry.sha`; `push()` calculava SHA-256 — formatos incompatíveis, nunca casavam | Campo `gitSha` separado; pull/clone calculam e salvam SHA-256 em `sha` |
+| 16 | `p.split is not a function` no chat mobile | Args de tool call podiam ser número (ex: `topK: 5`); `(v as string).split('/')` jogava TypeError | `typeof v === 'string' ? v : String(v)` antes do `.split()` |
 
 ---
 
-## 13. Estado Atual (v0.2.0)
+## 13. Estado Atual (v0.3.0)
 
 ### 13.1 Funcional
 
-- ✅ GitHub REST API sync — push / pull / status / pushFile / quickStatus
+- ✅ GitHub REST API sync — push / pull / clone / status / pushFile / quickStatus
+- ✅ Multi-repo: cada subpasta de projeto sincroniza com repo próprio
 - ✅ 3 ribbon icons separados (push / pull / sync)
 - ✅ Auto-pull no startup com quickStatus
+- ✅ Auto-push no save (roteado para o sync correto)
 - ✅ Termux bridge (comandos copia-e-cola)
 - ✅ Status bar com Termux status
 - ✅ LLM provider agnóstico (HTTP, Ollama, Hermes)
 - ✅ Wiki operations (inbox→raw→wiki)
-- ✅ Settings UI completo
-- ✅ 35 testes unitários (vitest)
-- ✅ Build: 26 KB, ~20ms
+- ✅ BM25 full-text search com persistência e reindexação automática
+- ✅ CLI bridge com detecção automática + botão ⏹ Parar (SIGTERM→SIGKILL)
+- ✅ InboxView funcional (filtros, aprovar/rejeitar)
+- ✅ ChatView funcional (CLI Task Panel + Vault Chat interno)
+- ✅ LintView funcional (auditoria frontmatter/index)
+- ✅ Wizard de onboarding (scaffold + CLAUDE.md/GEMINI.md/AGENTS.md)
+- ✅ Settings UI completo (inclui seção Projetos para multi-repo)
+- ✅ Instalador (`scripts/install.sh` — build + zip + deploy desktop/Android)
+- ✅ 238 testes unitários (vitest)
+- ✅ Build: 96 KB, ~20ms
 
-### 13.2 Stubs (UI pendente)
-
-- 🟡 InboxView — placeholder "em desenvolvimento"
-- 🟡 ChatView — placeholder "em desenvolvimento"
-- 🟡 LintView — placeholder "em desenvolvimento"
-
-### 13.3 Pendente
+### 13.2 Pendente
 
 - 🔴 iOS — nunca testado
-- 🔴 Cross-ingest — lógica implementada, UI pendente
-- 🔴 Conflito de merge — GitHub API sync sobrescreve (sem merge)
+- 🔴 Conflict Modal — hoje faz backup silencioso + sobrescreve; UI de resolução interativa pendente
+- 🟡 B-002 Terminal no ChatView — standby (node-pty requer binários nativos, inviável em zip)
 
 ---
 
-## 14. Roadmap Sugerido
+## 14. Roadmap
 
 | Versão | Features |
 |--------|----------|
-| **0.2.1** | Validar sync no iOS, testes de integração |
-| **0.3.0** | InboxView funcional (listar, filtrar, aprovar/rejeitar) |
-| **0.4.0** | ChatView funcional (chat com contexto do vault) |
-| **0.5.0** | LintView funcional (auditoria de contradições/órfãos) |
-| **1.0.0** | Todas as views completas, cross-ingest, merge handling |
+| **0.3.x** | Validar sync iOS; Conflict Modal UI interativa |
+| **0.4.0** | Rules engine (detectar padrões repetidos no log → sugerir regra) |
+| **1.0.0** | YAML robusto (pacote `yaml` já presente), merge handling, cross-ingest UI |
 
 ---
 
-## 15. Repositório
+## 15. Instalação e Deploy
 
-**GitHub:** [`lucassnts963/obsidian-vault-keeper`](https://github.com/lucassnts963/obsidian-vault-keeper)
-
-```
+```bash
 git clone https://github.com/lucassnts963/obsidian-vault-keeper.git
 cd obsidian-vault-keeper
 npm install
-npm run build
-npm test
-# Copiar main.js + manifest.json para .obsidian/plugins/vault-keeper/
+
+# Build + zip
+npm run zip
+
+# Build + instalar em vault desktop
+bash scripts/install.sh --vault /caminho/vault
+
+# Build + enviar para Android via adb
+bash scripts/install.sh --android
+
+# Opções adicionais
+bash scripts/install.sh --help
 ```
+
+## 16. Repositório
+
+**GitHub:** [`lucassnts963/obsidian-vault-keeper`](https://github.com/lucassnts963/obsidian-vault-keeper)
