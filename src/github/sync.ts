@@ -197,6 +197,55 @@ export class GitHubSync {
     if (!exists) await this.vault.adapter.mkdir(dir)
   }
 
+  private async ensureParentDirs(filePath: string): Promise<void> {
+    const parts = filePath.split('/')
+    parts.pop()
+    let current = ''
+    for (const part of parts) {
+      current = current ? `${current}/${part}` : part
+      const exists = await this.vault.adapter.exists(current)
+      if (!exists) { try { await this.vault.adapter.mkdir(current) } catch {} }
+    }
+  }
+
+  async clone(onPhase?: (msg: string) => void): Promise<string[]> {
+    const commits: string[] = []
+    const log = (msg: string) => { commits.push(msg); onPhase?.(msg) }
+
+    log('clone: obtendo tree remota...')
+    let remoteSHA: string
+    try {
+      const ref = await this.apiGet('/git/ref/heads/main')
+      remoteSHA = ref.object?.sha
+    } catch { log('clone: branch main não existe no remote'); return commits }
+
+    log('clone: baixando lista de arquivos...')
+    const tree = await this.apiGet(`/git/trees/${remoteSHA}?recursive=1`)
+    const files = (tree.tree || []).filter((f: any) => f.type === 'blob' && f.path.endsWith('.md'))
+
+    this.state = { lastRemoteSHA: '', files: {} }
+    let downloaded = 0
+    for (const f of files) {
+      if (f.size && f.size > MAX_FILE_SIZE) { log(`pulado ${f.path} (>1MB)`); continue }
+      log(`Clonando: ${downloaded + 1}/${files.length} — ${f.path}`)
+      try {
+        await this.ensureParentDirs(f.path)
+        const remote = await this.apiGet(`/contents/${f.path}?ref=main`)
+        if (!remote.content) continue
+        const decoded = base64ToUint8Array(remote.content.replace(/\n/g, ''))
+        const content = new TextDecoder('utf-8').decode(decoded)
+        await this.vault.adapter.write(f.path, content)
+        this.state.files[f.path] = { sha: f.sha, mtime: Date.now(), size: new TextEncoder().encode(content).byteLength }
+        downloaded++
+      } catch (err: any) { log(`ERRO ${f.path}: ${err.message?.slice(0, 80)}`) }
+      await delay(API_DELAY_MS / 2)
+    }
+    this.state.lastRemoteSHA = remoteSHA
+    await this.saveState()
+    log(`clone: ${downloaded}/${files.length} arquivos baixados`)
+    return commits
+  }
+
   async backupState(): Promise<void> {
     await this.ensureDataDir()
     const cloned = JSON.parse(JSON.stringify(this.state))

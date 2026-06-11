@@ -550,6 +550,94 @@ describe('GitHubSync', () => {
     })
   })
 
+  describe('clone', () => {
+    function makeSync(adapter: any) {
+      return new GitHubSync(
+        { adapter },
+        { remote: 'https://github.com/user/repo', token: 'ghp_test', authorName: 'Test', authorEmail: 'test@test.com', enabled: true, autoSyncMinutes: 0 },
+        '.obsidian/vault-keeper',
+      )
+    }
+
+    it('T-Clone-01: downloads all .md files and saves sync_state with remote SHA', async () => {
+      const adapter = {
+        read: vi.fn().mockRejectedValue(new Error('not found')),
+        write: vi.fn().mockResolvedValue(undefined),
+        readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
+        exists: vi.fn().mockResolvedValue(true),
+        stat: vi.fn().mockResolvedValue({ mtime: 0, size: 10 }),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue({ files: [], folders: [] }),
+      }
+      requestUrl
+        .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'head-sha-abc' } } }) // ref/heads/main
+        .mockResolvedValueOnce({ status: 200, json: { tree: [
+          { type: 'blob', path: 'wiki/index.md', sha: 'sha1', size: 100 },
+          { type: 'blob', path: 'wiki/log.md', sha: 'sha2', size: 200 },
+          { type: 'blob', path: 'inbox/note.md', sha: 'sha3', size: 50 },
+        ]}})  // git/trees/...
+        .mockResolvedValue({ status: 200, json: { content: btoa('# content') } }) // contents/...
+
+      const sync = makeSync(adapter)
+      const msgs = await sync.clone()
+
+      expect(msgs.some((m: string) => m.includes('3/3'))).toBe(true)
+      expect(msgs[msgs.length - 1]).toContain('3/3')
+      expect(adapter.write).toHaveBeenCalledWith('wiki/index.md', expect.any(String))
+      expect(adapter.write).toHaveBeenCalledWith('wiki/log.md', expect.any(String))
+      expect(adapter.write).toHaveBeenCalledWith('inbox/note.md', expect.any(String))
+      // sync_state must record the remote SHA
+      const stateWrite = (adapter.write.mock.calls as any[]).find(
+        ([path]: [string]) => path === '.obsidian/vault-keeper/sync_state.json',
+      )
+      expect(stateWrite).toBeDefined()
+      expect(stateWrite[1]).toContain('head-sha-abc')
+    })
+
+    it('T-Clone-02: creates parent directories before writing (mobile mkdir)', async () => {
+      const adapter = {
+        read: vi.fn().mockRejectedValue(new Error('not found')),
+        write: vi.fn().mockResolvedValue(undefined),
+        readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
+        exists: vi.fn().mockResolvedValue(false),
+        stat: vi.fn().mockResolvedValue({ mtime: 0, size: 10 }),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue({ files: [], folders: [] }),
+      }
+      requestUrl
+        .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'head-sha' } } })
+        .mockResolvedValueOnce({ status: 200, json: { tree: [
+          { type: 'blob', path: 'wiki/deep/page.md', sha: 'sha1', size: 10 },
+        ]}})
+        .mockResolvedValue({ status: 200, json: { content: btoa('hello') } })
+
+      const sync = makeSync(adapter)
+      await sync.clone()
+
+      expect(adapter.mkdir).toHaveBeenCalledWith('wiki')
+      expect(adapter.mkdir).toHaveBeenCalledWith('wiki/deep')
+    })
+
+    it('T-Clone-03: returns error message when branch main does not exist', async () => {
+      const adapter = {
+        read: vi.fn().mockRejectedValue(new Error('not found')),
+        write: vi.fn().mockResolvedValue(undefined),
+        readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
+        exists: vi.fn().mockResolvedValue(false),
+        stat: vi.fn().mockResolvedValue(null),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue({ files: [], folders: [] }),
+      }
+      requestUrl.mockResolvedValueOnce({ status: 404, json: { message: 'Not Found' } })
+
+      const sync = makeSync(adapter)
+      const msgs = await sync.clone()
+
+      expect(msgs.some((m: string) => m.includes('não existe'))).toBe(true)
+      expect(adapter.write).not.toHaveBeenCalled()
+    })
+  })
+
   describe('quickStatus (fast remote check)', () => {
 
     it('reports remote ahead when SHA differs', async () => {
