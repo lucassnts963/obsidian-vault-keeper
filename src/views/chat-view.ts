@@ -314,7 +314,10 @@ export class ChatView extends ItemView {
     if (msg.toolResults && msg.toolResults.length > 0) {
       for (const tc of msg.toolResults) {
         const argStr = Object.entries(tc.args)
-          .map(([, v]) => `${(v as string).split('/').pop() || v}`)
+          .map(([, v]) => {
+            const s = typeof v === 'string' ? v : String(v)
+            return s.split('/').pop() || s
+          })
           .filter(Boolean).join(', ')
         collapsible(`${tc.tool}(${argStr})`, tc.result, container)
       }

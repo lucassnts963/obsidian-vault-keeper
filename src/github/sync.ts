@@ -342,10 +342,7 @@ export class GitHubSync {
     const hash = await sha256(buf)
     const base64 = arrayBufferToBase64(buf)
     const body: any = { message: `vault: update ${path}`, content: base64, branch: 'main' }
-    const cached = this.state.files[path]
-    if (cached) {
-      try { const remote = await this.apiGet(`/contents/${path}?ref=main`); body.sha = remote.sha } catch {}
-    }
+    try { const remote = await this.apiGet(`/contents/${path}?ref=main`); body.sha = remote.sha } catch {}
     await this.apiPut(`/contents/${path}`, body)
     this.state.files[path] = { sha: hash, mtime: Date.now(), size: buf.byteLength }
     await this.saveState()
@@ -403,9 +400,7 @@ export class GitHubSync {
       const existing = this.state.files[path]
       try {
         const body: any = { message: `vault: update ${path}`, content: b64, branch: 'main' }
-        if (existing) {
-          try { const remote = await this.apiGet(`/contents/${path}?ref=main`); body.sha = remote.sha } catch {}
-        }
+        try { const remote = await this.apiGet(`/contents/${path}?ref=main`); body.sha = remote.sha } catch {}
         await this.apiPut(`/contents/${path}`, body)
         this.state.files[path] = { sha: hash, mtime: Date.now(), size: content.byteLength }
         log(`push: ${path}`)

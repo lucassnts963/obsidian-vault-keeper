@@ -447,12 +447,15 @@ describe('GitHubSync', () => {
 
       const fileContent = new TextEncoder().encode('hello vault')
       mockAdapter.readBinary.mockResolvedValueOnce(fileContent.buffer)
-      ;requestUrl.mockResolvedValueOnce({ status: 200, json: { sha: 'new-remote-sha' } })
+      // GET /contents/note.md → 404 (new file, no SHA needed) + PUT → 200
+      ;(requestUrl as any)
+        .mockResolvedValueOnce({ status: 404, json: { message: 'Not Found' } })
+        .mockResolvedValueOnce({ status: 200, json: { sha: 'new-remote-sha' } })
 
       const result = await sync.pushFile('note.md')
 
       expect(result).toBe('note.md')
-      expect(requestUrl).toHaveBeenCalledTimes(1)
+      expect(requestUrl).toHaveBeenCalledTimes(2)
       const calledUrl = requestUrl.mock.calls[0][0].url
       expect(calledUrl).toContain('/contents/note.md')
     })
