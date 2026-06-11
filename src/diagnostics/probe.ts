@@ -47,11 +47,15 @@ async function countMdFiles(adapter: any, dir = ''): Promise<number> {
   let count = 0
   try {
     const list = await adapter.list(dir || '')
+    const strip = (name: string) =>
+      dir && name.startsWith(dir + '/') ? name.slice(dir.length + 1) : name
     for (const f of list.files) {
-      if (f.endsWith('.md') && !f.startsWith('.')) count++
+      const base = strip(f)
+      if (base.endsWith('.md') && !base.startsWith('.')) count++
     }
     for (const sub of list.folders) {
-      if (!sub.startsWith('.')) count += await countMdFiles(adapter, dir ? `${dir}/${sub}` : sub)
+      const base = strip(sub)
+      if (!base.startsWith('.') && base !== '') count += await countMdFiles(adapter, dir ? `${dir}/${base}` : base)
     }
   } catch { /* stop walk on error */ }
   return count
