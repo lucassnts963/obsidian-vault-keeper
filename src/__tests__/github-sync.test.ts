@@ -447,12 +447,15 @@ describe('GitHubSync', () => {
 
       const fileContent = new TextEncoder().encode('hello vault')
       mockAdapter.readBinary.mockResolvedValueOnce(fileContent.buffer)
-      ;requestUrl.mockResolvedValueOnce({ status: 200, json: { sha: 'new-remote-sha' } })
+      // GET /contents/note.md → 404 (new file, no SHA needed) + PUT → 200
+      ;(requestUrl as any)
+        .mockResolvedValueOnce({ status: 404, json: { message: 'Not Found' } })
+        .mockResolvedValueOnce({ status: 200, json: { sha: 'new-remote-sha' } })
 
       const result = await sync.pushFile('note.md')
 
       expect(result).toBe('note.md')
-      expect(requestUrl).toHaveBeenCalledTimes(1)
+      expect(requestUrl).toHaveBeenCalledTimes(2)
       const calledUrl = requestUrl.mock.calls[0][0].url
       expect(calledUrl).toContain('/contents/note.md')
     })
@@ -483,6 +486,272 @@ describe('GitHubSync', () => {
       expect(requestUrl).toHaveBeenCalledTimes(2)
       const secondCallBody = JSON.parse(requestUrl.mock.calls[1][0].body)
       expect(secondCallBody.sha).toBe('remote-sha-123')
+    })
+  })
+
+  describe('Android CapacitorAdapter — full-path normalization', () => {
+    function makeSync(adapter: any) {
+      return new GitHubSync(
+        { adapter },
+        { remote: 'https://github.com/user/repo', token: 'ghp_test', authorName: 'Test', authorEmail: 'test@test.com', enabled: true, autoSyncMinutes: 0 },
+        '/test',
+      )
+    }
+
+    it('T-Android-01: walkFiles normalizes full-path entries from CapacitorAdapter', async () => {
+      const adapter = {
+        read: vi.fn().mockRejectedValue(new Error('not found')),
+        write: vi.fn().mockResolvedValue(undefined),
+        readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
+        exists: vi.fn().mockResolvedValue(false),
+        stat: vi.fn().mockResolvedValue({ mtime: 0, size: 10 }),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn()
+          .mockResolvedValueOnce({ files: [], folders: ['wiki'] })         // root
+          .mockResolvedValueOnce({ files: ['wiki/a.md', 'wiki/b.md'], folders: [] }), // wiki
+      }
+      const sync = makeSync(adapter)
+      const paths: string[] = []
+      for await (const p of (sync as any).walkFiles()) paths.push(p)
+      expect(paths).toEqual(['wiki/a.md', 'wiki/b.md'])
+      expect(paths).not.toContain('wiki/wiki/a.md')
+    })
+
+    it('T-Android-02: push completes without throwing with Android-style adapter', async () => {
+      const adapter = {
+        read: vi.fn().mockRejectedValue(new Error('not found')),
+        write: vi.fn().mockResolvedValue(undefined),
+        readBinary: vi.fn().mockResolvedValue(new TextEncoder().encode('content').buffer),
+        exists: vi.fn().mockResolvedValue(false),
+        stat: vi.fn().mockResolvedValue({ mtime: 1000, size: 7 }),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn()
+          .mockResolvedValueOnce({ files: [], folders: ['wiki'] })         // root walk
+          .mockResolvedValueOnce({ files: ['wiki/a.md', 'wiki/b.md'], folders: [] }) // wiki walk
+          .mockResolvedValueOnce({ files: [], folders: [] }), // deleted-file check fallback
+      }
+      requestUrl.mockResolvedValue({ status: 200, json: { sha: 'remote-sha', object: { sha: 'head-sha' } } })
+      const sync = makeSync(adapter)
+      const msgs = await sync.push()
+      expect(msgs.some((m: string) => m.includes('ERRO') && m.includes('ENOENT'))).toBe(false)
+      expect(msgs.some((m: string) => m.includes('push:') || m.includes('alterados'))).toBe(true)
+    })
+
+    it('T-Android-03: push skips file when stat throws ENOENT (does not propagate)', async () => {
+      const adapter = {
+        read: vi.fn().mockRejectedValue(new Error('not found')),
+        write: vi.fn().mockResolvedValue(undefined),
+        readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
+        exists: vi.fn().mockResolvedValue(false),
+        stat: vi.fn().mockRejectedValue(new Error('ENOENT: no such file')),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue({ files: ['broken.md'], folders: [] }),
+      }
+      const sync = makeSync(adapter)
+      const msgs = await sync.push()
+      expect(msgs).toContain('Nada alterado')
+    })
+  })
+
+  describe('clone', () => {
+    function makeSync(adapter: any) {
+      return new GitHubSync(
+        { adapter },
+        { remote: 'https://github.com/user/repo', token: 'ghp_test', authorName: 'Test', authorEmail: 'test@test.com', enabled: true, autoSyncMinutes: 0 },
+        '.obsidian/vault-keeper',
+      )
+    }
+
+    it('T-Clone-01: downloads all .md files and saves sync_state with remote SHA', async () => {
+      const adapter = {
+        read: vi.fn().mockRejectedValue(new Error('not found')),
+        write: vi.fn().mockResolvedValue(undefined),
+        readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
+        exists: vi.fn().mockResolvedValue(true),
+        stat: vi.fn().mockResolvedValue({ mtime: 0, size: 10 }),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue({ files: [], folders: [] }),
+      }
+      requestUrl
+        .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'head-sha-abc' } } }) // ref/heads/main
+        .mockResolvedValueOnce({ status: 200, json: { tree: [
+          { type: 'blob', path: 'wiki/index.md', sha: 'sha1', size: 100 },
+          { type: 'blob', path: 'wiki/log.md', sha: 'sha2', size: 200 },
+          { type: 'blob', path: 'inbox/note.md', sha: 'sha3', size: 50 },
+        ]}})  // git/trees/...
+        .mockResolvedValue({ status: 200, json: { content: btoa('# content') } }) // contents/...
+
+      const sync = makeSync(adapter)
+      const msgs = await sync.clone()
+
+      expect(msgs.some((m: string) => m.includes('3/3'))).toBe(true)
+      expect(msgs[msgs.length - 1]).toContain('3/3')
+      expect(adapter.write).toHaveBeenCalledWith('wiki/index.md', expect.any(String))
+      expect(adapter.write).toHaveBeenCalledWith('wiki/log.md', expect.any(String))
+      expect(adapter.write).toHaveBeenCalledWith('inbox/note.md', expect.any(String))
+      // sync_state must record the remote SHA
+      const stateWrite = (adapter.write.mock.calls as any[]).find(
+        ([path]: [string]) => path === '.obsidian/vault-keeper/sync_state.json',
+      )
+      expect(stateWrite).toBeDefined()
+      expect(stateWrite[1]).toContain('head-sha-abc')
+    })
+
+    it('T-Clone-02: creates parent directories before writing (mobile mkdir)', async () => {
+      const adapter = {
+        read: vi.fn().mockRejectedValue(new Error('not found')),
+        write: vi.fn().mockResolvedValue(undefined),
+        readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
+        exists: vi.fn().mockResolvedValue(false),
+        stat: vi.fn().mockResolvedValue({ mtime: 0, size: 10 }),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue({ files: [], folders: [] }),
+      }
+      requestUrl
+        .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'head-sha' } } })
+        .mockResolvedValueOnce({ status: 200, json: { tree: [
+          { type: 'blob', path: 'wiki/deep/page.md', sha: 'sha1', size: 10 },
+        ]}})
+        .mockResolvedValue({ status: 200, json: { content: btoa('hello') } })
+
+      const sync = makeSync(adapter)
+      await sync.clone()
+
+      expect(adapter.mkdir).toHaveBeenCalledWith('wiki')
+      expect(adapter.mkdir).toHaveBeenCalledWith('wiki/deep')
+    })
+
+    it('T-Clone-03: returns error message when branch main does not exist', async () => {
+      const adapter = {
+        read: vi.fn().mockRejectedValue(new Error('not found')),
+        write: vi.fn().mockResolvedValue(undefined),
+        readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
+        exists: vi.fn().mockResolvedValue(false),
+        stat: vi.fn().mockResolvedValue(null),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue({ files: [], folders: [] }),
+      }
+      requestUrl.mockResolvedValueOnce({ status: 404, json: { message: 'Not Found' } })
+
+      const sync = makeSync(adapter)
+      const msgs = await sync.clone()
+
+      expect(msgs.some((m: string) => m.includes('não existe'))).toBe(true)
+      expect(adapter.write).not.toHaveBeenCalled()
+    })
+  })
+
+  describe('SHA consistency — pull/clone store SHA-256, push uses SHA-256', () => {
+    function makeSync(adapter: any) {
+      return new GitHubSync(
+        { adapter },
+        { remote: 'https://github.com/user/repo', token: 'ghp_test', authorName: 'Test', authorEmail: 'test@test.com', enabled: true, autoSyncMinutes: 0 },
+        '.obsidian/vault-keeper',
+      )
+    }
+
+    it('T-SHA-01: after pull(), state.sha is SHA-256 so subsequent push finds no changes', async () => {
+      const fileContent = '# Hello'
+      const fileBytes = new TextEncoder().encode(fileContent).slice()
+      let savedState: string | null = null
+      const adapter = {
+        read: vi.fn().mockImplementation(async () => { if (savedState) return savedState; throw new Error('not found') }),
+        write: vi.fn().mockImplementation(async (_path: string, data: string) => { savedState = data }),
+        readBinary: vi.fn().mockResolvedValue(fileBytes.buffer),
+        exists: vi.fn().mockResolvedValue(true),
+        stat: vi.fn().mockResolvedValue({ mtime: 1000, size: fileBytes.byteLength }),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue({ files: [], folders: [] }),
+      }
+      // pull: ref + tree + file content
+      requestUrl
+        .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'commit-sha-1' } } })
+        .mockResolvedValueOnce({ status: 200, json: { tree: [
+          { type: 'blob', path: 'wiki/page.md', sha: 'git-blob-sha1', size: 7 },
+        ]}})
+        .mockResolvedValueOnce({ status: 200, json: { content: btoa(fileContent) } })
+
+      const sync = makeSync(adapter)
+      await sync.pull()
+
+      const entry = (sync as any).state.files['wiki/page.md']
+      // sha must NOT be the git blob SHA — it must be SHA-256 (64 hex chars)
+      expect(entry.sha).not.toBe('git-blob-sha1')
+      expect(entry.sha).toMatch(/^[0-9a-f]{64}$/)
+      // gitSha must store the original git blob sha
+      expect(entry.gitSha).toBe('git-blob-sha1')
+
+      // Now push: adapter.list returns the same file with same stat
+      requestUrl.mockReset()
+      adapter.list.mockResolvedValueOnce({ files: [], folders: ['wiki'] })
+                 .mockResolvedValueOnce({ files: ['wiki/page.md'], folders: [] })
+      const pushMsgs = await sync.push()
+      expect(pushMsgs).toContain('Nada alterado')
+      // No PUT calls should have been made
+      expect(requestUrl).not.toHaveBeenCalled()
+    })
+
+    it('T-SHA-02: after clone(), state.sha is SHA-256 so subsequent push finds no changes', async () => {
+      const fileContent = '# Cloned'
+      const fileBytes = new TextEncoder().encode(fileContent).slice()
+      let savedState: string | null = null
+      const adapter = {
+        read: vi.fn().mockImplementation(async () => { if (savedState) return savedState; throw new Error('not found') }),
+        write: vi.fn().mockImplementation(async (_path: string, data: string) => { savedState = data }),
+        readBinary: vi.fn().mockResolvedValue(fileBytes.buffer),
+        exists: vi.fn().mockResolvedValue(true),
+        stat: vi.fn().mockResolvedValue({ mtime: 1000, size: fileBytes.byteLength }),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue({ files: [], folders: [] }),
+      }
+      requestUrl
+        .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'commit-sha-2' } } })
+        .mockResolvedValueOnce({ status: 200, json: { tree: [
+          { type: 'blob', path: 'wiki/page.md', sha: 'git-blob-sha2', size: 8 },
+        ]}})
+        .mockResolvedValueOnce({ status: 200, json: { content: btoa(fileContent) } })
+
+      const sync = makeSync(adapter)
+      await sync.clone()
+
+      const entry = (sync as any).state.files['wiki/page.md']
+      expect(entry.sha).toMatch(/^[0-9a-f]{64}$/)
+      expect(entry.gitSha).toBe('git-blob-sha2')
+
+      requestUrl.mockReset()
+      adapter.list.mockResolvedValueOnce({ files: [], folders: ['wiki'] })
+                 .mockResolvedValueOnce({ files: ['wiki/page.md'], folders: [] })
+      const pushMsgs = await sync.push()
+      expect(pushMsgs).toContain('Nada alterado')
+      expect(requestUrl).not.toHaveBeenCalled()
+    })
+
+    it('T-SHA-03: pull() skips file when cached.gitSha matches remote git SHA', async () => {
+      const adapter = {
+        read: vi.fn().mockResolvedValue(JSON.stringify({
+          lastRemoteSHA: 'old-commit',
+          files: { 'wiki/page.md': { sha: 'some-sha256', gitSha: 'known-git-sha', mtime: 100, size: 10 } },
+        })),
+        write: vi.fn().mockResolvedValue(undefined),
+        readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
+        exists: vi.fn().mockResolvedValue(true),
+        stat: vi.fn().mockResolvedValue({ mtime: 100, size: 10 }),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue({ files: [], folders: [] }),
+      }
+      requestUrl
+        .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'new-commit' } } })
+        .mockResolvedValueOnce({ status: 200, json: { tree: [
+          { type: 'blob', path: 'wiki/page.md', sha: 'known-git-sha', size: 10 },
+        ]}})
+
+      const sync = makeSync(adapter)
+      await sync.pull()
+
+      // write should NOT have been called — file was skipped via gitSha match
+      expect(adapter.write).toHaveBeenCalledTimes(1) // only sync_state.json
+      const writeCall = adapter.write.mock.calls[0]
+      expect(writeCall[0]).toContain('sync_state.json')
     })
   })
 
@@ -532,6 +801,101 @@ describe('GitHubSync', () => {
       const status = await sync.quickStatus()
       expect(status.remoteAhead).toBe(false)
       expect(status.branch).toBe('main')
+    })
+  })
+
+  describe('Multi-repo — rootDir + excludeRoots', () => {
+    const settings = { remote: 'https://github.com/user/proj', token: 'ghp_test', authorName: 'T', authorEmail: 't@t.com', enabled: true, autoSyncMinutes: 0 }
+
+    it('T-MultiRepo-01: rootDir sync walks only that subdir and pushes with relative paths', async () => {
+      let savedState: string | null = null
+      const fileContent = '# Project page'
+      const fileBytes = new TextEncoder().encode(fileContent).slice()
+      const adapter = {
+        read: vi.fn().mockImplementation(async () => { if (savedState) return savedState; throw new Error('not found') }),
+        write: vi.fn().mockImplementation(async (_p: string, d: string) => { savedState = d }),
+        readBinary: vi.fn().mockResolvedValue(fileBytes.buffer),
+        exists: vi.fn().mockResolvedValue(true),
+        stat: vi.fn().mockResolvedValue({ mtime: 999, size: fileBytes.byteLength }),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        // Only returns files when listing the project subdir
+        list: vi.fn().mockImplementation(async (dir: string) => {
+          if (dir === 'projects/alpha') return { files: [], folders: ['wiki'] }
+          if (dir === 'projects/alpha/wiki') return { files: ['projects/alpha/wiki/page.md'], folders: [] }
+          return { files: [], folders: [] }
+        }),
+      }
+
+      const sync = new GitHubSync({ adapter } as any, settings, '.obsidian/vault-keeper', 'projects/alpha')
+
+      // Push: GET returns 404 (new file), PUT succeeds
+      requestUrl
+        .mockResolvedValueOnce({ status: 404, json: { message: 'Not Found' } })
+        .mockResolvedValueOnce({ status: 200, json: { sha: 'abc123' } })
+
+      const msgs = await sync.push()
+
+      // Should push wiki/page.md (NOT projects/alpha/wiki/page.md)
+      expect(msgs).toContain('push: wiki/page.md')
+      const putCall = (requestUrl as any).mock.calls.find((c: any) => c[0]?.method === 'PUT')
+      expect(putCall[0].url).toContain('/contents/wiki/page.md')
+      expect(putCall[0].url).not.toContain('projects/alpha')
+    })
+
+    it('T-MultiRepo-02: main sync with excludeRoots skips project subdir', async () => {
+      const adapter = {
+        read: vi.fn().mockRejectedValue(new Error('not found')),
+        write: vi.fn().mockResolvedValue(undefined),
+        readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
+        exists: vi.fn().mockResolvedValue(true),
+        stat: vi.fn().mockResolvedValue({ mtime: 1, size: 0 }),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockImplementation(async (dir: string) => {
+          if (dir === '' || dir === undefined) return { files: ['README.md'], folders: ['projects'] }
+          if (dir === 'projects') return { files: [], folders: ['alpha'] }
+          if (dir === 'projects/alpha') return { files: ['projects/alpha/wiki/secret.md'], folders: [] }
+          return { files: [], folders: [] }
+        }),
+      }
+
+      const mainSync = new GitHubSync({ adapter } as any, settings, '.obsidian/vault-keeper', '', ['projects/alpha'])
+      const walked: string[] = []
+      for await (const f of (mainSync as any).walkFiles()) walked.push(f)
+
+      // Should see README.md but NOT projects/alpha/wiki/secret.md
+      expect(walked).toContain('README.md')
+      expect(walked.some(f => f.includes('alpha'))).toBe(false)
+    })
+
+    it('T-MultiRepo-03: pull() with rootDir writes files under rootDir in vault', async () => {
+      let savedState: string | null = null
+      const fileContent = '# Remote page'
+      const adapter = {
+        read: vi.fn().mockImplementation(async () => { if (savedState) return savedState; throw new Error('not found') }),
+        write: vi.fn().mockImplementation(async (_p: string, d: string) => { if (!_p.endsWith('.json')) savedState = savedState; }),
+        readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
+        exists: vi.fn().mockResolvedValue(true),
+        stat: vi.fn().mockResolvedValue({ mtime: 1, size: 0 }),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue({ files: [], folders: [] }),
+      }
+
+      const sync = new GitHubSync({ adapter } as any, settings, '.obsidian/vault-keeper', 'projects/alpha')
+
+      requestUrl
+        .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'commit-1' } } })
+        .mockResolvedValueOnce({ status: 200, json: { tree: [
+          { type: 'blob', path: 'wiki/page.md', sha: 'git-sha-1', size: fileContent.length },
+        ]}})
+        .mockResolvedValueOnce({ status: 200, json: { content: btoa(fileContent) } })
+
+      await sync.pull()
+
+      // adapter.write should have been called with the vault path (projects/alpha/wiki/page.md)
+      const writeCalls = (adapter.write as any).mock.calls
+      const fileWrite = writeCalls.find((c: any) => c[0] === 'projects/alpha/wiki/page.md')
+      expect(fileWrite).toBeTruthy()
+      expect(fileWrite[1]).toBe(fileContent)
     })
   })
 })

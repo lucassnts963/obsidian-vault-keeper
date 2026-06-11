@@ -13,7 +13,7 @@ const ROUTING_TABLE = `## Roteamento de Intenção / Intent Routing
 | Ingerir fonte / Ingest a source             | read_file(raw/fonte.md)            | ingest_file                   |
 | Revisar inbox / Review inbox                | list_dir(inbox/)                   | approve_file / reject_file    |
 | Lint / Auditoria / Find issues              | run_lint({})                       | report findings               |
-| Foco de sessão / Session focus              | read_file(_slots/focus.md)         | usar como contexto            |
+| Foco de sessão / Session focus              | read_file(wiki/_slots/focus.md)    | usar como contexto            |
 | Criar página wiki / Create wiki page        | write_page(titulo, conteudo, tags) | pronto / done                 |
 
 Prefira bm25_search a read_index para consultas por tópico — retorna resultados ranqueados diretamente.

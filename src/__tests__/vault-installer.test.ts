@@ -41,14 +41,14 @@ describe('VaultInstaller', () => {
   })
 
   // T-06: ensureStructure creates standard dirs and files
-  it('ensureStructure() creates inbox/, raw/, wiki/, _slots/', async () => {
+  it('ensureStructure() creates inbox/, raw/, wiki/, wiki/_slots/', async () => {
     const inst = new VaultInstaller(adapter)
     const result = await inst.ensureStructure()
 
     expect(adapter.dirs).toContain('inbox')
     expect(adapter.dirs).toContain('raw')
     expect(adapter.dirs).toContain('wiki')
-    expect(adapter.dirs).toContain('_slots')
+    expect(adapter.dirs).toContain('wiki/_slots')
     expect(result.created).toContain('inbox/')
     expect(result.created).toContain('raw/')
     expect(result.created).toContain('wiki/')
@@ -98,7 +98,7 @@ describe('VaultInstaller', () => {
 
   // T-08: migration moves files to inbox/ with path prefix
   it('migrateExistingFiles() moves files to inbox/ with path prefix', async () => {
-    adapter.dirs.push('inbox', 'raw', 'wiki', '_slots', '.vault-keeper')
+    adapter.dirs.push('inbox', 'raw', 'wiki', 'wiki/_slots', '.vault-keeper')
     adapter.files['Notas/Pessoais/diario.md'] = '# Diário\n\nConteúdo.'
 
     const inst = new VaultInstaller(adapter)

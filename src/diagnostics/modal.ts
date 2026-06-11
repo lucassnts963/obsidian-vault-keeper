@@ -55,10 +55,10 @@ export class DiagnosticsModal extends Modal {
       }
     })
 
-    const saveBtn = btnRow.createEl('button', { text: 'Salvar em _slots/diagnostics.md' })
+    const saveBtn = btnRow.createEl('button', { text: 'Salvar em wiki/_slots/diagnostics.md' })
     saveBtn.addEventListener('click', async () => {
       try {
-        await this.vault.adapter.write('_slots/diagnostics.md', md)
+        await this.vault.adapter.write('wiki/_slots/diagnostics.md', md)
         saveBtn.textContent = 'Salvo ✅'
       } catch (e: any) {
         saveBtn.textContent = `Erro: ${e.message?.slice(0, 40)}`

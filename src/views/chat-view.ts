@@ -58,8 +58,10 @@ export class ChatView extends ItemView {
   private chatAreaEl: HTMLElement | null = null
   private progressEl: HTMLElement | null = null
   private contBtnEl: HTMLButtonElement | null = null
+  private stopBtnEl: HTMLButtonElement | null = null
   private inputEl: HTMLInputElement | null = null
   private layoutBuilt = false
+  private userAborted = false
 
   constructor(leaf: WorkspaceLeaf, plugin: VaultKeeperPlugin) {
     super(leaf)
@@ -88,6 +90,7 @@ export class ChatView extends ItemView {
     this.chatAreaEl = null
     this.progressEl = null
     this.contBtnEl = null
+    this.stopBtnEl = null
     this.inputEl = null
 
     const isCliMode = !!this.cliBridge
@@ -130,7 +133,12 @@ export class ChatView extends ItemView {
         title.textContent += ' (copiar comando)'
       }
 
-      const contBtn = header.createEl('button') as HTMLButtonElement
+      const headerBtns = header.createEl('div')
+      headerBtns.style.display = 'flex'
+      headerBtns.style.gap = '6px'
+      headerBtns.style.alignItems = 'center'
+
+      const contBtn = headerBtns.createEl('button') as HTMLButtonElement
       this.contBtnEl = contBtn
       contBtn.style.fontSize = '11px'
       contBtn.style.padding = '2px 8px'
@@ -142,6 +150,25 @@ export class ChatView extends ItemView {
         this.updateContBtn()
       })
       this.updateContBtn()
+
+      if (CLIBridge.isDesktop()) {
+        const stopBtn = headerBtns.createEl('button') as HTMLButtonElement
+        this.stopBtnEl = stopBtn
+        stopBtn.textContent = '⏹ Parar'
+        stopBtn.title = 'Interromper o CLI em execução (SIGTERM)'
+        stopBtn.style.fontSize = '11px'
+        stopBtn.style.padding = '2px 8px'
+        stopBtn.style.borderRadius = '4px'
+        stopBtn.style.cursor = 'pointer'
+        stopBtn.style.border = '1px solid var(--background-modifier-border)'
+        stopBtn.style.background = 'var(--background-modifier-error)'
+        stopBtn.style.color = 'var(--text-error)'
+        stopBtn.style.display = 'none'
+        stopBtn.addEventListener('click', () => {
+          this.userAborted = true
+          this.cliBridge?.abort()
+        })
+      }
     } else {
       title.textContent = 'Vault Chat (modo interno)'
     }
@@ -243,9 +270,11 @@ export class ChatView extends ItemView {
       const dots = '.'.repeat((this.cliElapsed % 3) + 1).padEnd(3, ' ')
       this.progressEl.textContent = `⏳ Processando${dots} ${this.cliElapsed}s`
       this.progressEl.style.padding = '4px 8px'
+      if (this.stopBtnEl) this.stopBtnEl.style.display = ''
     } else {
       this.progressEl.textContent = ''
       this.progressEl.style.padding = '0 8px'
+      if (this.stopBtnEl) this.stopBtnEl.style.display = 'none'
     }
   }
 
@@ -285,7 +314,10 @@ export class ChatView extends ItemView {
     if (msg.toolResults && msg.toolResults.length > 0) {
       for (const tc of msg.toolResults) {
         const argStr = Object.entries(tc.args)
-          .map(([, v]) => `${(v as string).split('/').pop() || v}`)
+          .map(([, v]) => {
+            const s = typeof v === 'string' ? v : String(v)
+            return s.split('/').pop() || s
+          })
           .filter(Boolean).join(', ')
         collapsible(`${tc.tool}(${argStr})`, tc.result, container)
       }
@@ -497,7 +529,10 @@ export class ChatView extends ItemView {
       }
 
       let finalMsg: ChatMessage
-      if (timedOut) {
+      if (this.userAborted) {
+        this.userAborted = false
+        finalMsg = { role: 'system', content: 'CLI interrompido pelo usuário.' }
+      } else if (timedOut) {
         finalMsg = {
           role: 'system',
           content: `⏱️ Timeout (${this.cliElapsed}s): processo encerrado. O CLI pode não suportar modo não-interativo.`,

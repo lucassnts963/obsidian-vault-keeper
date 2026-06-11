@@ -10,7 +10,7 @@ Always respond in the same language the user writes in.
 - inbox/        → notas brutas a revisar / raw notes to review (status: inbox)
 - raw/          → aprovadas aguardando ingest / approved, awaiting ingest (status: approved)
 - wiki/         → páginas compiladas / compiled knowledge pages (status: ingested)
-- _slots/       → estado de sessão / session state (focus.md, lint-report.md…)
+- wiki/_slots/  → estado de sessão / session state (focus.md, lint-report.md…)
 - .vault-keeper/bm25-index.json → índice BM25 leve / lightweight full-text index
 
 ## Fluxos / Karpathy Methodology Flows
@@ -23,7 +23,7 @@ Adicione linha em / Add row to wiki/index.md. Marque a fonte com status: ingeste
 ### Lint / Auditoria
 Escaneie / Scan wiki/ para / for: frontmatter ausente / missing frontmatter,
 páginas órfãs / orphaned pages, entradas faltando no index / missing index entries.
-Escreva relatório / Write report em / to _slots/lint-report.md.
+Escreva relatório / Write report em / to wiki/_slots/lint-report.md.
 
 ### Query / Consulta
 Use .vault-keeper/bm25-index.json para encontrar / to find relevant pages.
@@ -34,7 +34,17 @@ Escreva / Write the current task description em / to _slots/focus.md.
 Leia ao iniciar sessão / Read at session start para contexto / for context.`
 
 export class CLIBridge {
+  private currentProc: any = null
+
   constructor(private settings: VaultKeeperSettings) {}
+
+  abort(): void {
+    if (!this.currentProc) return
+    const proc = this.currentProc
+    proc.kill('SIGTERM')
+    setTimeout(() => { try { proc.kill('SIGKILL') } catch {} }, 3000)
+    this.currentProc = null
+  }
 
   static async detect(): Promise<AgentCLI | null> {
     if (typeof process === 'undefined' || !process.versions) return null
@@ -100,7 +110,7 @@ export class CLIBridge {
       case 'query':
         return prompt(`${args.question || 'Responda a consulta sobre o vault'} (veja ${instrFile})`)
       case 'focus':
-        return prompt(`Atualize _slots/focus.md com: ${args.description || 'tarefa atual'} (veja ${instrFile})`)
+        return prompt(`Atualize wiki/_slots/focus.md com: ${args.description || 'tarefa atual'} (veja ${instrFile})`)
     }
   }
 
@@ -147,6 +157,7 @@ export class CLIBridge {
         stdio: ['ignore', 'pipe', 'pipe'],
         env,
       })
+      this.currentProc = proc
       const lines: string[] = []
       let timedOut = false
 
@@ -174,6 +185,7 @@ export class CLIBridge {
       })
 
       proc.on('close', (code: number | null) => {
+        this.currentProc = null
         if (killTimer) clearTimeout(killTimer)
         resolve({ exitCode: code ?? 0, stdout: lines.join('\n'), timedOut })
       })

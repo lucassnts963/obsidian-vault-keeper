@@ -5,7 +5,7 @@ export interface VaultTemplate {
 
 export function defaultVaultTemplate(): VaultTemplate {
   return {
-    dirs: ['inbox', 'raw', 'wiki', '_slots', '.vault-keeper'],
+    dirs: ['inbox', 'raw', 'wiki', 'wiki/_slots', '.vault-keeper'],
     files: [
       {
         path: 'wiki/index.md',
@@ -16,7 +16,7 @@ export function defaultVaultTemplate(): VaultTemplate {
         content: '# Log de Atividades\n',
       },
       {
-        path: '_slots/focus.md',
+        path: 'wiki/_slots/focus.md',
         content: '',
       },
       {

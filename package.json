@@ -8,7 +8,10 @@
     "build": "tsc -noEmit -skipLibCheck && node esbuild.config.mjs production",
     "lint": "eslint . --ext .ts",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "zip": "bash scripts/install.sh --skip-tests",
+    "install:vault": "bash scripts/install.sh --vault",
+    "install:android": "bash scripts/install.sh --android"
   },
   "dependencies": {
     "yaml": "^2.5.0"

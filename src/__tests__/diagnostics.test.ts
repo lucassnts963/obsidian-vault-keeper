@@ -5,7 +5,7 @@ import { DEFAULT_SETTINGS } from '../settings'
 
 function makeAdapter(overrides: Partial<Record<string, any>> = {}) {
   const files: Record<string, string> = {}
-  const dirs: string[] = ['', 'inbox', 'raw', 'wiki', '_slots', '.obsidian']
+  const dirs: string[] = ['', 'inbox', 'raw', 'wiki', 'wiki/_slots', '.obsidian']
   return {
     files, dirs,
     constructor: { name: 'MockAdapter' },

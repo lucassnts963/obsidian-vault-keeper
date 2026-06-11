@@ -24,7 +24,7 @@ export interface DiagnosticReport {
   pushDryRun: ProbeResult
 }
 
-const PROBE_PATHS = ['', 'inbox', 'raw', 'wiki', '_slots', '.obsidian', '.obsidian/vault-keeper']
+const PROBE_PATHS = ['', 'inbox', 'raw', 'wiki', 'wiki/_slots', '.obsidian', '.obsidian/vault-keeper']
 const DATA_DIR = '.obsidian/vault-keeper'
 const PROBE_FILE = `${DATA_DIR}/_diag_probe.json`
 
@@ -47,11 +47,15 @@ async function countMdFiles(adapter: any, dir = ''): Promise<number> {
   let count = 0
   try {
     const list = await adapter.list(dir || '')
+    const strip = (name: string) =>
+      dir && name.startsWith(dir + '/') ? name.slice(dir.length + 1) : name
     for (const f of list.files) {
-      if (f.endsWith('.md') && !f.startsWith('.')) count++
+      const base = strip(f)
+      if (base.endsWith('.md') && !base.startsWith('.')) count++
     }
     for (const sub of list.folders) {
-      if (!sub.startsWith('.')) count += await countMdFiles(adapter, dir ? `${dir}/${sub}` : sub)
+      const base = strip(sub)
+      if (!base.startsWith('.') && base !== '') count += await countMdFiles(adapter, dir ? `${dir}/${base}` : base)
     }
   } catch { /* stop walk on error */ }
   return count
@@ -127,16 +131,20 @@ export async function runDiagnostics(vault: Vault, settings: VaultKeeperSettings
     const walk = async (dir = ''): Promise<void> => {
       let list: any
       try { list = await adapter.list(dir || '') } catch { errors++; return }
+      const strip = (name: string) =>
+        dir && name.startsWith(dir + '/') ? name.slice(dir.length + 1) : name
       for (const f of list.files) {
-        if (!f.endsWith('.md') || f.startsWith('.')) continue
-        const path = dir ? `${dir}/${f}` : f
+        const base = strip(f)
+        if (!base.endsWith('.md') || base.startsWith('.')) continue
+        const path = dir ? `${dir}/${base}` : base
         try {
           const stat = await adapter.stat(path)
           if (stat) changed++
         } catch { errors++ }
       }
       for (const sub of list.folders) {
-        if (!sub.startsWith('.')) await walk(dir ? `${dir}/${sub}` : sub)
+        const base = strip(sub)
+        if (!base.startsWith('.') && base !== '') await walk(dir ? `${dir}/${base}` : base)
       }
     }
     await walk()

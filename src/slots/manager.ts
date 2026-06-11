@@ -13,7 +13,7 @@ interface VaultAdapter {
 }
 
 export class SlotsManager {
-  static readonly slotsDir = '_slots'
+  static readonly slotsDir = 'wiki/_slots'
 
   constructor(private readonly adapter: VaultAdapter) {}
 
