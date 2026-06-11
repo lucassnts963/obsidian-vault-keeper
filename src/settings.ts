@@ -54,6 +54,7 @@ export interface VaultKeeperSettings {
   wikiPath: string
   logPath: string
   indexPath: string
+  allocationDataPath: string
 }
 
 export const DEFAULT_SETTINGS: VaultKeeperSettings = {
@@ -95,4 +96,5 @@ export const DEFAULT_SETTINGS: VaultKeeperSettings = {
   wikiPath: 'wiki',
   logPath: 'wiki/log.md',
   indexPath: 'wiki/index.md',
+  allocationDataPath: 'data/allocations.md',
 }

@@ -20,6 +20,9 @@ import { DiagnosticsModal } from './diagnostics/modal'
 import { CloneRepositoryModal } from './github/clone-modal'
 import { ConflictResolutionModal } from './github/conflict-modal'
 import { SlotsManager } from './slots/manager'
+import { AllocationReader } from './allocation/reader'
+import { AllocationWikiGenerator } from './allocation/wiki-generator'
+import { AllocationExcelGenerator } from './allocation/excel-generator'
 
 const SYNC_ICON =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>'
@@ -209,6 +212,34 @@ export default class VaultKeeperPlugin extends Plugin {
       name: 'Ajuda e instruções para IA',
       hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'H' }],
       callback: () => this.activateView(HELP_VIEW_TYPE),
+    })
+    this.addCommand({
+      id: 'generate-allocation',
+      name: 'Gerar alocação diária (wiki + Excel)',
+      callback: async () => {
+        try {
+          const reader = new AllocationReader(this.app.vault.adapter as any, this.settings.allocationDataPath)
+          const entries = await reader.read()
+          const date = new Date().toISOString().slice(0, 10)
+
+          const wikiGen = new AllocationWikiGenerator()
+          const mdContent = wikiGen.generate(entries, date)
+          const wikiPath = `${this.settings.wikiPath}/allocation-${date}.md`
+          if (await this.app.vault.adapter.exists(wikiPath)) {
+            await this.app.vault.adapter.write(wikiPath, mdContent)
+          } else {
+            await this.app.vault.create(wikiPath, mdContent)
+          }
+
+          const excelGen = new AllocationExcelGenerator()
+          const buf = excelGen.generate(entries, date)
+          await this.app.vault.adapter.writeBinary(`allocation-${date}.xlsx`, buf)
+
+          new Notice(`Alocação gerada: ${wikiPath}`)
+        } catch (err: any) {
+          new Notice(`Erro ao gerar alocação: ${err?.message ?? err}`)
+        }
+      },
     })
 
     this.addRibbonIcon('inbox', 'Vault Keeper: Inbox', () => this.activateView(INBOX_VIEW_TYPE))
