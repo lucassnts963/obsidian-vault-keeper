@@ -641,6 +641,120 @@ describe('GitHubSync', () => {
     })
   })
 
+  describe('SHA consistency — pull/clone store SHA-256, push uses SHA-256', () => {
+    function makeSync(adapter: any) {
+      return new GitHubSync(
+        { adapter },
+        { remote: 'https://github.com/user/repo', token: 'ghp_test', authorName: 'Test', authorEmail: 'test@test.com', enabled: true, autoSyncMinutes: 0 },
+        '.obsidian/vault-keeper',
+      )
+    }
+
+    it('T-SHA-01: after pull(), state.sha is SHA-256 so subsequent push finds no changes', async () => {
+      const fileContent = '# Hello'
+      const fileBytes = new TextEncoder().encode(fileContent).slice()
+      let savedState: string | null = null
+      const adapter = {
+        read: vi.fn().mockImplementation(async () => { if (savedState) return savedState; throw new Error('not found') }),
+        write: vi.fn().mockImplementation(async (_path: string, data: string) => { savedState = data }),
+        readBinary: vi.fn().mockResolvedValue(fileBytes.buffer),
+        exists: vi.fn().mockResolvedValue(true),
+        stat: vi.fn().mockResolvedValue({ mtime: 1000, size: fileBytes.byteLength }),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue({ files: [], folders: [] }),
+      }
+      // pull: ref + tree + file content
+      requestUrl
+        .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'commit-sha-1' } } })
+        .mockResolvedValueOnce({ status: 200, json: { tree: [
+          { type: 'blob', path: 'wiki/page.md', sha: 'git-blob-sha1', size: 7 },
+        ]}})
+        .mockResolvedValueOnce({ status: 200, json: { content: btoa(fileContent) } })
+
+      const sync = makeSync(adapter)
+      await sync.pull()
+
+      const entry = (sync as any).state.files['wiki/page.md']
+      // sha must NOT be the git blob SHA — it must be SHA-256 (64 hex chars)
+      expect(entry.sha).not.toBe('git-blob-sha1')
+      expect(entry.sha).toMatch(/^[0-9a-f]{64}$/)
+      // gitSha must store the original git blob sha
+      expect(entry.gitSha).toBe('git-blob-sha1')
+
+      // Now push: adapter.list returns the same file with same stat
+      requestUrl.mockReset()
+      adapter.list.mockResolvedValueOnce({ files: [], folders: ['wiki'] })
+                 .mockResolvedValueOnce({ files: ['wiki/page.md'], folders: [] })
+      const pushMsgs = await sync.push()
+      expect(pushMsgs).toContain('Nada alterado')
+      // No PUT calls should have been made
+      expect(requestUrl).not.toHaveBeenCalled()
+    })
+
+    it('T-SHA-02: after clone(), state.sha is SHA-256 so subsequent push finds no changes', async () => {
+      const fileContent = '# Cloned'
+      const fileBytes = new TextEncoder().encode(fileContent).slice()
+      let savedState: string | null = null
+      const adapter = {
+        read: vi.fn().mockImplementation(async () => { if (savedState) return savedState; throw new Error('not found') }),
+        write: vi.fn().mockImplementation(async (_path: string, data: string) => { savedState = data }),
+        readBinary: vi.fn().mockResolvedValue(fileBytes.buffer),
+        exists: vi.fn().mockResolvedValue(true),
+        stat: vi.fn().mockResolvedValue({ mtime: 1000, size: fileBytes.byteLength }),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue({ files: [], folders: [] }),
+      }
+      requestUrl
+        .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'commit-sha-2' } } })
+        .mockResolvedValueOnce({ status: 200, json: { tree: [
+          { type: 'blob', path: 'wiki/page.md', sha: 'git-blob-sha2', size: 8 },
+        ]}})
+        .mockResolvedValueOnce({ status: 200, json: { content: btoa(fileContent) } })
+
+      const sync = makeSync(adapter)
+      await sync.clone()
+
+      const entry = (sync as any).state.files['wiki/page.md']
+      expect(entry.sha).toMatch(/^[0-9a-f]{64}$/)
+      expect(entry.gitSha).toBe('git-blob-sha2')
+
+      requestUrl.mockReset()
+      adapter.list.mockResolvedValueOnce({ files: [], folders: ['wiki'] })
+                 .mockResolvedValueOnce({ files: ['wiki/page.md'], folders: [] })
+      const pushMsgs = await sync.push()
+      expect(pushMsgs).toContain('Nada alterado')
+      expect(requestUrl).not.toHaveBeenCalled()
+    })
+
+    it('T-SHA-03: pull() skips file when cached.gitSha matches remote git SHA', async () => {
+      const adapter = {
+        read: vi.fn().mockResolvedValue(JSON.stringify({
+          lastRemoteSHA: 'old-commit',
+          files: { 'wiki/page.md': { sha: 'some-sha256', gitSha: 'known-git-sha', mtime: 100, size: 10 } },
+        })),
+        write: vi.fn().mockResolvedValue(undefined),
+        readBinary: vi.fn().mockResolvedValue(new ArrayBuffer(0)),
+        exists: vi.fn().mockResolvedValue(true),
+        stat: vi.fn().mockResolvedValue({ mtime: 100, size: 10 }),
+        mkdir: vi.fn().mockResolvedValue(undefined),
+        list: vi.fn().mockResolvedValue({ files: [], folders: [] }),
+      }
+      requestUrl
+        .mockResolvedValueOnce({ status: 200, json: { object: { sha: 'new-commit' } } })
+        .mockResolvedValueOnce({ status: 200, json: { tree: [
+          { type: 'blob', path: 'wiki/page.md', sha: 'known-git-sha', size: 10 },
+        ]}})
+
+      const sync = makeSync(adapter)
+      await sync.pull()
+
+      // write should NOT have been called — file was skipped via gitSha match
+      expect(adapter.write).toHaveBeenCalledTimes(1) // only sync_state.json
+      const writeCall = adapter.write.mock.calls[0]
+      expect(writeCall[0]).toContain('sync_state.json')
+    })
+  })
+
   describe('quickStatus (fast remote check)', () => {
 
     it('reports remote ahead when SHA differs', async () => {

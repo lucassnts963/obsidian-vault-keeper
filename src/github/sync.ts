@@ -12,7 +12,8 @@ export interface SyncSettings {
 }
 
 export interface FileEntry {
-  sha: string
+  sha: string       // SHA-256 do conteúdo (usado em push para detectar mudança)
+  gitSha?: string   // Git blob SHA1 do GitHub (usado em pull para pular arquivos inalterados)
   mtime: number
   size: number
 }
@@ -235,7 +236,9 @@ export class GitHubSync {
         const decoded = base64ToUint8Array(remote.content.replace(/\n/g, ''))
         const content = new TextDecoder('utf-8').decode(decoded)
         await this.vault.adapter.write(f.path, content)
-        this.state.files[f.path] = { sha: f.sha, mtime: Date.now(), size: new TextEncoder().encode(content).byteLength }
+        const contentBuf = new TextEncoder().encode(content)
+        const hash = await sha256(contentBuf.slice().buffer)
+        this.state.files[f.path] = { sha: hash, gitSha: f.sha, mtime: Date.now(), size: contentBuf.byteLength }
         downloaded++
       } catch (err: any) { log(`ERRO ${f.path}: ${err.message?.slice(0, 80)}`) }
       await delay(API_DELAY_MS / 2)
@@ -440,7 +443,7 @@ export class GitHubSync {
     let downloaded = 0; let skipped = 0; let backups = 0
     for (const f of files) {
       const cached = this.state.files[f.path]
-      if (cached && cached.sha === f.sha) continue
+      if (cached && cached.gitSha === f.sha) continue
       if (f.size && f.size > MAX_FILE_SIZE) { log(`pulado ${f.path} (>1MB)`); skipped++; continue }
       try {
         // Handle local modifications based on conflictStrategy
@@ -466,7 +469,9 @@ export class GitHubSync {
         const decoded = base64ToUint8Array(file.content.replace(/\n/g, ''))
         const content = new TextDecoder('utf-8').decode(decoded)
         await this.vault.adapter.write(f.path, content)
-        this.state.files[f.path] = { sha: f.sha, mtime: Date.now(), size: new TextEncoder().encode(content).byteLength }
+        const contentBuf = new TextEncoder().encode(content)
+        const hash = await sha256(contentBuf.slice().buffer)
+        this.state.files[f.path] = { sha: hash, gitSha: f.sha, mtime: Date.now(), size: contentBuf.byteLength }
         downloaded++
       } catch (err: any) { log(`ERRO pull ${f.path}: ${err.message?.slice(0, 80)}`) }
       await delay(API_DELAY_MS / 2)
