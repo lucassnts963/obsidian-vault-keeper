@@ -5,6 +5,6 @@ Quando uma feature entrar em desenvolvimento, criar `.specs/changes/NNN-nome/spe
 
 | ID | Feature | Prioridade | Status |
 |----|---------|-----------|--------|
-| B-001 | Parar processo CLI | Alta | backlog |
+| B-001 | Parar processo CLI | Alta | done |
 | B-002 | ChatView como terminal | Média | backlog |
 | B-003 | Clonar repositório | Média | done |
