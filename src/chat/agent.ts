@@ -17,6 +17,7 @@ export class VaultAgent {
   private wiki: any
   systemPrompt = ''
   private configLoaded = false
+  private customAgent: string | null = null
 
   constructor(
     vault: any, llm: LLMProvider,
@@ -48,6 +49,7 @@ export class VaultAgent {
       const section = raw.split(/^(?=## )/m).find((b: string) => b.startsWith('## Vault Agent'))
       custom = section ? section.replace(/^## Vault Agent[^\n]*\n/, '').trim() : null
     } catch {}
+    this.customAgent = custom
     this.systemPrompt = buildSystemPrompt(custom)
     this.configLoaded = true
   }
@@ -71,11 +73,15 @@ export class VaultAgent {
     return { type: 'answer', content: text }
   }
 
-  async run(question: string, history: Message[]): Promise<AgentResponse> {
+  async run(question: string, history: Message[], focusedProjects?: string[]): Promise<AgentResponse> {
     await this.ensureConfig()
 
+    const sysPrompt = focusedProjects?.length
+      ? buildSystemPrompt(this.customAgent, focusedProjects)
+      : this.systemPrompt
+
     const messages: Message[] = [
-      { role: 'system', content: this.systemPrompt },
+      { role: 'system', content: sysPrompt },
       ...history,
       { role: 'user', content: question },
     ]
@@ -99,7 +105,7 @@ export class VaultAgent {
 
       let result: string
       try {
-        result = await executeTool(this.vault, toolCall.tool, toolCall.args, this.indexPath, this.wiki, this.llm, this.maxFileChars, this.lintPaths)
+        result = await executeTool(this.vault, toolCall.tool, toolCall.args, this.indexPath, this.wiki, this.llm, this.maxFileChars, this.lintPaths, focusedProjects)
       } catch (err: any) {
         result = `Tool error: ${err.message}`
       }
@@ -113,7 +119,7 @@ export class VaultAgent {
     }
 
     const finalMessages: Message[] = [
-      { role: 'system', content: this.systemPrompt },
+      { role: 'system', content: sysPrompt },
       { role: 'user', content: 'Você atingiu o máximo de chamadas. Responda a pergunta original com o contexto coletado. / You reached the maximum number of tool calls. Answer based on context gathered. Original question: ' + question },
     ]
     const finalResp = await this.llm.chat(finalMessages, { temperature: 0.3 })

@@ -1,4 +1,4 @@
-import { Notice, Plugin, WorkspaceLeaf, addIcon, TAbstractFile } from 'obsidian'
+import { Notice, Plugin, WorkspaceLeaf, addIcon, TAbstractFile, App, FuzzySuggestModal } from 'obsidian'
 import { VaultKeeperSettings, DEFAULT_SETTINGS, ProjectVault } from './settings'
 import { VaultKeeperSettingTab } from './settings-tab'
 import { GitHubSync } from './github/sync'
@@ -18,6 +18,7 @@ import { IndexPersistence } from './search/index-persistence'
 import { DiagnosticsModal } from './diagnostics/modal'
 import { CloneRepositoryModal } from './github/clone-modal'
 import { ConflictResolutionModal } from './github/conflict-modal'
+import { SlotsManager } from './slots/manager'
 
 const SYNC_ICON =
   '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21.5 2v6h-6M2.5 22v-6h6M2 11.5a10 10 0 0 1 18.8-4.3M22 12.5a10 10 0 0 1-18.8 4.2"/></svg>'
@@ -190,6 +191,12 @@ export default class VaultKeeperPlugin extends Plugin {
         new CloneRepositoryModal(this.app, this.github, this.settings.git.remote).open()
       },
     })
+    this.addCommand({
+      id: 'project-focus',
+      name: 'Definir foco de projeto',
+      hotkeys: [{ modifiers: ['Mod', 'Shift'], key: 'O' }],
+      callback: () => this.openFocusModal(),
+    })
 
     this.addRibbonIcon('inbox', 'Vault Keeper: Inbox', () => this.activateView(INBOX_VIEW_TYPE))
     this.addRibbonIcon('message-square', 'Vault Keeper: Chat', () => this.activateView(CHAT_VIEW_TYPE))
@@ -310,7 +317,7 @@ export default class VaultKeeperPlugin extends Plugin {
 
     try {
       await this.github!.backupState()
-      const allSyncs = [this.github!, ...this.projectSyncs]
+      const allSyncs = await this.getSyncsForFocus()
       const allMsgs: string[] = []
       for (const sync of allSyncs) {
         const msgs = await sync.push((phase) => notice.setMessage(`🔄 ${phase}`), onConflict)
@@ -340,7 +347,7 @@ export default class VaultKeeperPlugin extends Plugin {
 
     const notice = new Notice('🔄 Pull...', 0)
     try {
-      const allSyncs = [this.github!, ...this.projectSyncs]
+      const allSyncs = await this.getSyncsForFocus()
       const allMsgs: string[] = []
       for (const sync of allSyncs) {
         const msgs = await sync.pull((phase) => notice.setMessage(`🔄 ${phase}`))
@@ -375,7 +382,7 @@ export default class VaultKeeperPlugin extends Plugin {
     try {
       await this.github!.backupState()
 
-      const allSyncs = [this.github!, ...this.projectSyncs]
+      const allSyncs = await this.getSyncsForFocus()
       let pushMsgs: string[] = []
       let pushFailed = false
       try {
@@ -586,6 +593,52 @@ export default class VaultKeeperPlugin extends Plugin {
       .filter((s): s is GitHubSync => s !== null)
   }
 
+  private openFocusModal(): void {
+    const projects = (this.settings.vaults.projects || []).filter(p => p.path)
+    if (projects.length === 0) { new Notice('Nenhum projeto configurado em Settings → Git Sync → Projetos.'); return }
+    const a = this.app.vault.adapter
+    const slots = new SlotsManager({
+      read: (p) => a.read(p),
+      write: (p, c) => a.write(p, c),
+      exists: async (p) => !!(await a.exists(p)),
+      mkdir: (p) => a.mkdir(p),
+    })
+
+    slots.getFocus().then(current => {
+      const modal = new ProjectFocusModal(this.app, projects, current.projects, async (path) => {
+        const isActive = current.projects.includes(path)
+        const updated = isActive
+          ? { ...current, projects: current.projects.filter(p => p !== path) }
+          : { ...current, projects: [...current.projects, path] }
+        await slots.setFocus(updated)
+        const name = path.split('/').pop() || path
+        new Notice(isActive ? `Foco removido: ${name}` : `Foco ativo: ${name}`)
+      })
+      modal.open()
+    }).catch(() => {})
+  }
+
+  private async getSyncsForFocus(): Promise<GitHubSync[]> {
+    const all = [this.github!, ...this.projectSyncs].filter(Boolean)
+    try {
+      const a = this.app.vault.adapter
+      const slots = new SlotsManager({
+        read: (p) => a.read(p),
+        write: (p, c) => a.write(p, c),
+        exists: async (p) => !!(await a.exists(p)),
+        mkdir: (p) => a.mkdir(p),
+      })
+      const focus = await slots.getFocus()
+      if (!focus.projects.length) return all
+      return all.filter(s =>
+        (focus.includeRoot && s === this.github) ||
+        focus.projects.some(fp => s.ownsFile(`${fp}/dummy.md`))
+      )
+    } catch {
+      return all
+    }
+  }
+
   /** Find the sync instance responsible for a vault-relative file path. */
   private syncForFile(vaultRelPath: string): GitHubSync | null {
     for (const s of this.projectSyncs) {
@@ -602,4 +655,29 @@ export default class VaultKeeperPlugin extends Plugin {
       this.doPush().catch(() => {})
     }
   }
+}
+
+class ProjectFocusModal extends FuzzySuggestModal<{ name: string; path: string }> {
+  constructor(
+    app: App,
+    private projects: Array<{ name: string; path: string }>,
+    private activePaths: string[],
+    private onToggle: (path: string) => void,
+  ) {
+    super(app)
+    this.setPlaceholder('Digite o nome do projeto...')
+  }
+
+  getItems() { return this.projects }
+
+  getItemText(p: { name: string; path: string }) { return p.name || p.path }
+
+  renderSuggestion(match: { item: { name: string; path: string } }, el: HTMLElement) {
+    const p = match.item
+    const active = this.activePaths.includes(p.path)
+    el.createEl('div', { text: `${active ? '✓ ' : ''}${p.name || p.path}` })
+    el.createEl('small', { text: p.path }).style.color = 'var(--text-muted)'
+  }
+
+  onChooseItem(p: { name: string; path: string }) { this.onToggle(p.path) }
 }

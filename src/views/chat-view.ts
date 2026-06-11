@@ -3,6 +3,7 @@ import type VaultKeeperPlugin from '../main'
 import { bubble, center, collapsible, loadingDots } from './ui'
 import { renderMarkdown } from './markdown'
 import { CLIBridge } from '../agents/cli-bridge'
+import { SlotsManager, type FocusState } from '../slots/manager'
 
 // eslint-disable-next-line no-control-regex
 const ANSI_RE = /\x1B\[[0-9;]*[mGKHFJA-Za-z]|\x1B\][^\x07]*\x07|\r/g
@@ -62,6 +63,10 @@ export class ChatView extends ItemView {
   private inputEl: HTMLInputElement | null = null
   private layoutBuilt = false
   private userAborted = false
+  private focusState: FocusState = { projects: [], includeRoot: false }
+  private focusStripEl: HTMLElement | null = null
+  private autocompleteEl: HTMLElement | null = null
+  private slotsManager: SlotsManager | null = null
 
   constructor(leaf: WorkspaceLeaf, plugin: VaultKeeperPlugin) {
     super(leaf)
@@ -79,6 +84,16 @@ export class ChatView extends ItemView {
     if (!this.continueSessionInitialized) {
       this.continueSession = this.plugin.settings.cli?.preferred === 'opencode'
       this.continueSessionInitialized = true
+    }
+    if ((this.plugin.settings.vaults.projects?.length ?? 0) > 0) {
+      const a = this.plugin.app.vault.adapter
+      this.slotsManager = new SlotsManager({
+        read: (p) => a.read(p),
+        write: (p, c) => a.write(p, c),
+        exists: async (p) => !!(await a.exists(p)),
+        mkdir: (p) => a.mkdir(p),
+      })
+      this.focusState = await this.slotsManager.getFocus()
     }
     this.buildLayout()
   }
@@ -199,6 +214,12 @@ export class ChatView extends ItemView {
     this.progressEl = prog
     this.updateProgress()
 
+    // Focus strip (hidden when no focus active)
+    const focusStrip = this.contentEl.createEl('div')
+    focusStrip.style.flexShrink = '0'
+    this.focusStripEl = focusStrip
+    this.renderFocusBar()
+
     // Input row (flex-shrink:0)
     const inputRow = this.contentEl.createEl('div')
     inputRow.style.display = 'flex'
@@ -237,7 +258,15 @@ export class ChatView extends ItemView {
     sendBtn.style.flexShrink = '0'
     sendBtn.addEventListener('click', () => this.send(input))
 
-    input.addEventListener('keydown', (e) => { if (e.key === 'Enter') this.send(input) })
+    input.addEventListener('keydown', (e) => {
+      if (e.key === 'Escape') { this.hideAutocomplete(); return }
+      if (this.autocompleteEl) {
+        if (e.key === 'Enter') { e.preventDefault(); this.selectFirstAutocomplete(input); return }
+      }
+      if (e.key === 'Enter') this.send(input)
+    })
+    input.addEventListener('input', () => this.handleAtMention(input))
+    input.addEventListener('blur', () => setTimeout(() => this.hideAutocomplete(), 150))
 
     this.layoutBuilt = true
     this.scrollToBottom()
@@ -574,6 +603,120 @@ export class ChatView extends ItemView {
     return { type: 'query', args: { question: text } }
   }
 
+  private getAvailableProjects(): Array<{ name: string; path: string }> {
+    return (this.plugin.settings.vaults.projects || [])
+      .filter(p => p.path)
+      .map(p => ({ name: p.name || p.path.split('/').pop() || p.path, path: p.path }))
+  }
+
+  private renderFocusBar(): void {
+    const strip = this.focusStripEl
+    if (!strip) return
+    strip.empty()
+
+    const available = this.getAvailableProjects()
+    if (available.length === 0 || this.focusState.projects.length === 0) {
+      strip.style.display = 'none'
+      return
+    }
+
+    strip.style.cssText = 'display:flex;align-items:center;gap:4px;padding:4px 8px;flex-shrink:0;flex-wrap:wrap;border-bottom:1px solid var(--background-modifier-border)'
+
+    const label = strip.createEl('span', { text: 'Foco:' })
+    label.style.cssText = 'font-size:11px;color:var(--text-muted);white-space:nowrap'
+
+    const maxVisible = 3
+    const visible = this.focusState.projects.slice(0, maxVisible)
+    const overflow = this.focusState.projects.length - maxVisible
+
+    for (const path of visible) {
+      const name = this.getAvailableProjects().find(p => p.path === path)?.name ?? path.split('/').pop() ?? path
+      const chip = strip.createEl('span')
+      chip.style.cssText = 'display:inline-flex;align-items:center;gap:3px;padding:1px 8px;border-radius:10px;font-size:11px;background:var(--interactive-accent);color:var(--text-on-accent);user-select:none'
+      chip.createEl('span', { text: name })
+      const x = chip.createEl('span', { text: '×' })
+      x.style.cssText = 'cursor:pointer;margin-left:2px;opacity:0.8'
+      x.addEventListener('click', () => this.removeFocus(path))
+    }
+
+    if (overflow > 0) {
+      const more = strip.createEl('span', { text: `+${overflow}` })
+      more.style.cssText = 'font-size:11px;color:var(--text-muted)'
+    }
+
+    const clearBtn = strip.createEl('button', { text: '✕ limpar' })
+    clearBtn.style.cssText = 'margin-left:auto;font-size:11px;padding:1px 6px;cursor:pointer;border:1px solid var(--background-modifier-border);border-radius:4px;background:transparent;color:var(--text-muted)'
+    clearBtn.addEventListener('click', () => this.clearFocus())
+  }
+
+  private async addFocus(path: string): Promise<void> {
+    if (this.focusState.projects.includes(path)) return
+    this.focusState = { ...this.focusState, projects: [...this.focusState.projects, path] }
+    await this.slotsManager?.setFocus(this.focusState)
+    this.renderFocusBar()
+  }
+
+  private async removeFocus(path: string): Promise<void> {
+    this.focusState = { ...this.focusState, projects: this.focusState.projects.filter(p => p !== path) }
+    await this.slotsManager?.setFocus(this.focusState)
+    this.renderFocusBar()
+  }
+
+  private async clearFocus(): Promise<void> {
+    this.focusState = { projects: [], includeRoot: false }
+    await this.slotsManager?.setFocus(this.focusState)
+    this.renderFocusBar()
+  }
+
+  private handleAtMention(input: HTMLInputElement): void {
+    const val = input.value
+    const atMatch = val.match(/@(\w*)$/)
+    if (!atMatch) { this.hideAutocomplete(); return }
+    const prefix = atMatch[1].toLowerCase()
+    const available = this.getAvailableProjects()
+    const matches = prefix
+      ? available.filter(p => p.name.toLowerCase().startsWith(prefix))
+      : available
+    if (matches.length === 0) { this.hideAutocomplete(); return }
+    this.showAutocomplete(input, matches, atMatch[0])
+  }
+
+  private showAutocomplete(input: HTMLInputElement, projects: Array<{ name: string; path: string }>, atText: string): void {
+    this.hideAutocomplete()
+    const rect = input.getBoundingClientRect()
+    const ac = document.createElement('div')
+    this.autocompleteEl = ac
+    ac.style.cssText = `position:fixed;left:${rect.left}px;bottom:${window.innerHeight - rect.top + 4}px;background:var(--background-primary);border:1px solid var(--background-modifier-border);border-radius:6px;overflow:hidden;z-index:1000;min-width:180px;box-shadow:0 4px 12px rgba(0,0,0,0.2)`
+
+    for (const p of projects.slice(0, 5)) {
+      const focused = this.focusState.projects.includes(p.path)
+      const item = ac.appendChild(document.createElement('div'))
+      item.style.cssText = 'padding:6px 10px;cursor:pointer;font-size:12px;display:flex;align-items:center;gap:6px'
+      item.innerHTML = `<span style="width:14px;text-align:center">${focused ? '✓' : ''}</span><span>${p.name}</span>`
+      item.addEventListener('mouseenter', () => { item.style.background = 'var(--background-modifier-hover)' })
+      item.addEventListener('mouseleave', () => { item.style.background = '' })
+      item.addEventListener('mousedown', (e) => {
+        e.preventDefault()
+        input.value = input.value.replace(atText, '')
+        if (focused) this.removeFocus(p.path)
+        else this.addFocus(p.path)
+        this.hideAutocomplete()
+        input.focus()
+      })
+    }
+    document.body.appendChild(ac)
+  }
+
+  private selectFirstAutocomplete(input: HTMLInputElement): void {
+    const first = this.autocompleteEl?.querySelector('div') as HTMLElement | null
+    first?.dispatchEvent(new MouseEvent('mousedown', { bubbles: true }))
+  }
+
+  private hideAutocomplete(): void {
+    this.autocompleteEl?.remove()
+    this.autocompleteEl = null
+  }
+
   private async sendToLLM(question: string) {
     if (!this.plugin.llm || !this.plugin.agent) return
 
@@ -584,7 +727,8 @@ export class ChatView extends ItemView {
       : (this.messages as any).slice(-6)
 
     try {
-      const response = await this.plugin.agent.run(question, context)
+      const focusedProjects = this.focusState.projects.length > 0 ? this.focusState.projects : undefined
+      const response = await this.plugin.agent.run(question, context, focusedProjects)
       if (loading) loading.remove()
       const agentMsg: ChatMessage = {
         role: 'agent',

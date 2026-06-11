@@ -4,7 +4,7 @@ import { describe, it, expect, vi, beforeEach, beforeAll, afterEach } from 'vite
 
 function mockPlugin() {
   return {
-    settings: { wikiPath: 'wiki', indexPath: 'wiki/index.md' },
+    settings: { wikiPath: 'wiki', indexPath: 'wiki/index.md', vaults: { projects: [] } },
     app: {
       vault: {
         adapter: {
@@ -66,7 +66,7 @@ describe('ChatView', () => {
   it('send() renders error message when agent.run() rejects', async () => {
     const plugin = {
       ...mockPlugin(),
-      settings: { wikiPath: 'wiki', indexPath: 'wiki/index.md', agent: { resetContext: false } },
+      settings: { wikiPath: 'wiki', indexPath: 'wiki/index.md', vaults: { projects: [] }, agent: { resetContext: false } },
       agent: { run: vi.fn().mockRejectedValue(new Error('LLM timeout')) },
     }
     const view = new ChatView({}, plugin)

@@ -54,9 +54,12 @@ ${ROUTING_TABLE}
 
 ${TOOL_FORMAT}`
 
-export function buildSystemPrompt(customAgent: string | null): string {
+export function buildSystemPrompt(customAgent: string | null, focusedProjects?: string[]): string {
+  const focusSection = focusedProjects?.length
+    ? `\n\n## Foco de Projeto Ativo / Active Project Focus\nFoco: ${focusedProjects.join(', ')}. Priorize conteúdo desses projetos. / Focus: ${focusedProjects.join(', ')}. Prioritize content from these projects when searching and answering.`
+    : ''
   if (customAgent) {
-    return `${customAgent}\n\n---\n\n${FAITHFULNESS_RULE}\n\n${ROUTING_TABLE}\n\n${TOOL_FORMAT}`
+    return `${customAgent}${focusSection}\n\n---\n\n${FAITHFULNESS_RULE}\n\n${ROUTING_TABLE}\n\n${TOOL_FORMAT}`
   }
-  return DEFAULT_AGENT_PROMPT
+  return `${DEFAULT_AGENT_PROMPT}${focusSection}`
 }

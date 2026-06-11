@@ -94,13 +94,19 @@ export async function runLint(
 export async function bm25Search(
   vault: any,
   args: { query: string; topK?: number },
+  focusedPaths?: string[],
 ): Promise<string> {
   try {
     const persist = new IndexPersistence(vault.adapter)
-    const entries = await persist.load()
+    const allEntries = await persist.load()
+    const entries = focusedPaths?.length
+      ? allEntries.filter(e => focusedPaths.some(fp => e.path.startsWith(fp + '/')))
+      : allEntries
 
     if (entries.length === 0) {
-      return 'Index is empty. Run ingest to build the index first.'
+      return focusedPaths?.length
+        ? `No indexed pages found in focused projects: ${focusedPaths.join(', ')}. Try running ingest for this project.`
+        : 'Index is empty. Run ingest to build the index first.'
     }
 
     const docs = entries.map(e => ({
@@ -139,10 +145,11 @@ export async function writePageTool(vault: any, args: any, _idx: string, wiki: a
 export async function executeTool(
   vault: any, tool: string, args: any, indexPath: string, wiki?: any, llm?: any, maxFileChars?: number,
   lintPaths?: { wikiPath: string; inboxPath: string; rawPath: string },
+  focusedPaths?: string[],
 ): Promise<string> {
   const mc = maxFileChars || MAX_CHARS
   switch (tool) {
-    case 'bm25_search': return bm25Search(vault, args)
+    case 'bm25_search': return bm25Search(vault, args, focusedPaths)
     case 'read_file': return readFile(vault, args.path, mc)
     case 'list_dir': return listDir(vault, args.path)
     case 'read_index': return readIndex(vault, indexPath, mc)
